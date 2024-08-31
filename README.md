@@ -99,7 +99,7 @@ Conectado ao MongoDB
 <br><br>
 <img src="https://github.com/ErikaMendes89/projeto-buscador-filmes-react/blob/main/imagens-projeto-verzel/Captura%20de%20tela%202024-08-31%20001027.png" >
 <br><br>
-<b>Acesse o vídeo de demostração</b> <br>
+🕵🏾‍♀️<b>Acesse o vídeo de demostração</b>🔍 <br>
 
 [https://drive.google.com/drive/folders/12z7L8n07eRH39lujAh1xEiORzpOffCbV](https://drive.google.com/file/d/1-xHfIsZ7NoLedtR0TAUTnZoIcWD19oOO/view?usp=drive_link)
 
