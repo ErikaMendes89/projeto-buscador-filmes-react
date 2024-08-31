@@ -109,15 +109,14 @@ Conectado ao MongoDB
 
 ## Problemas Conhecidos
 <ol>
-  <li>API Key: A chave da API TMDB deve ser configurada corretamente em um arquivo .env.Igual eu fiz no projeto https://github.com/ErikaMendes89/projeto-recomendacao-de-filmes</li>
-  <li>Recarregamento da Página: Ao adicionar/remover um favorito, a página recarrega para refletir as mudanças. Uma melhoria futura pode ser a atualização dinâmica 
+  <li><b>API Key:</b> A chave da API TMDB deve ser configurada corretamente em um arquivo .env.Igual eu fiz no projeto https://github.com/ErikaMendes89/projeto-recomendacao-de-filmes</li>
+  <li><b>Recarregamento da Página:</b>Ao adicionar/remover um favorito, a página recarrega para refletir as mudanças. Uma melhoria futura pode ser a atualização dinâmica 
    sem recarregar.</li>
-  <li>Melhorias que quero adicionar login (tela de caasdtro e tela de login), onde o armazenando dos favoritos seria armazenado individualmente. E comentarios dos 
- amigos que a lista foi compartilhada se deu match com amiguinho sobre o filme ser fav também.  </li>
+  <li><b>Melhorias que quero adicionar:</b> login (tela de caasdtro e tela de login), onde o armazenando dos favoritos seria armazenado individualmente. E comentarios dos amigos que a lista foi compartilhada se deu match com amiguinho sobre o filme ser fav também.  </li>
 </ol>
 
 ## Considerções Finais
-Sinta-se à vontade para contribuir com o projeto através de pull requests. Por favor, certifique-se de que quaisquer mudanças estejam de acordo com o estilo e a arquitetura do projeto existente.
+Sinta-se à vontade para contribuir com o projeto através de pull requests. Por favor, certifique-se de que quaisquer mudanças estejam de acordo com o estilo e a arquitetura do projeto existente. Todo Feedback é bem-vindo!! 
 <br><br>
 ![DarthVaderStarWarsGIF](https://github.com/user-attachments/assets/a059abc6-f553-4429-ad55-702a2e8087d1)
 
