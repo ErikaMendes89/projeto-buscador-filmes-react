@@ -1,0 +1,65 @@
+.search-bar-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 15px auto; 
+    width: 50%; 
+    max-width: 400px; 
+    border-radius: 40px;
+    background: linear-gradient(145deg, #B1B9C9, #F3FDFF);
+    box-shadow: inset 20.42px 20.42px 50px #b1c2e1, inset -20.42px -20.42px 30px #FFFFFF;
+    transition: box-shadow 0.3s ease;
+}
+  
+.search-bar {
+    width: 200%;
+    padding: 15px;
+    border: none;
+    border-radius: 50px 0 0 50px; 
+    font-size: 1.1rem;
+    color: #333;
+    background-color: transparent;
+    outline: none;
+   
+}
+  
+.search-button {
+    padding: 15px;
+    background-color: #5e84d7; 
+    border: none;
+    border-radius: 0 50px 50px 0; 
+    cursor: pointer;
+    color: #fff; 
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.3s ease;
+    width: 60px;
+    height: 70px;
+}
+  
+.search-button:hover {
+    background-color: #555; 
+}
+  
+.search-button svg {
+    font-size: 1.1rem;
+}
+.favorite-btn{
+    background: #b9c5f1c7;
+    border-radius: 50px;
+    box-shadow: 6px 8px 10px #b1c2e1, -4px -4px 10px #727272;
+    padding: 20px 30px;
+    border: none;
+    font-size: 16px;
+    color: #333;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 5px;
+    font-size: 1.2rem;
+    font-weight: 100;
+  }
+  
+.favorite-btn:hover{
+    box-shadow: inset 8px 8px 16px #b1c2e1, inset -8px -8px 16px #dae4ec;
+}

@@ -1,0 +1,50 @@
+.favorites-list {
+  display: flex;
+  flex-direction: column; 
+  align-items: center;
+  padding: 20px; 
+  background-color: #bbd3eb;
+  text-align: center; 
+  min-height: 400vh;
+}
+
+.share-btn {
+  background: #b9c5f1c7;
+  border-radius: 50px;
+  box-shadow: 6px 8px 10px #b1c2e1, -4px -4px 10px #727272;
+  padding: 20px 50px;
+  font-size: 16px;
+  color: #333;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-top: 5px;
+  font-size: 1.2rem;
+  font-weight: 100;
+}
+
+  
+.share-btn:hover{
+    box-shadow: inset 8px 8px 16px #b1c2e1, inset -8px -8px 16px #dae4ec;
+}
+
+
+.back-btn {
+  position: absolute; 
+  top: 40px;
+  right: 40px; 
+  background-color: #b9c5f1c7;
+  box-shadow: 6px 8px 10px #b1c2e1, -4px -4px 10px #727272;
+  color: rgb(11, 11, 11);
+  border: none;
+  padding: 10px 20px;
+  cursor: pointer;
+  border-radius: 50px;
+  margin-right: 10px;
+  width:80px;
+  height:80px;
+  font-size: 1.1rem;
+}
+
+.back-btn:hover {
+  box-shadow: inset 8px 8px 16px #b1c2e1, inset 8px -8px 16px #faf8f8
+}

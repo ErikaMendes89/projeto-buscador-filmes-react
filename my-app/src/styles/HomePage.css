@@ -1,0 +1,21 @@
+.home-page {
+    padding: 20px;
+    background-color: #bbd3eb; 
+    min-height: 100vh;
+  }
+
+.movie-list {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+}
+
+.search-favorites-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 15px auto;
+  width: 50%; 
+  max-width: 600px; 
+}

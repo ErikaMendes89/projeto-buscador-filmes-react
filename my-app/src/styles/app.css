@@ -1,0 +1,30 @@
+body {
+    font-family: 'Arial', sans-serif;
+    color: #333;
+    margin: 0px;
+    padding: 0px;
+     
+  }
+  
+.Header {
+    background-color: #ffffff;
+    padding: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    text-align: center;
+  }
+  
+h1 {
+    font-size: 1.2rem;
+    color: #0c5081;
+    text-shadow: 0 10px 3px rgba(34, 34, 34, 0.1);
+    text-align: center; 
+    margin: 15px auto;
+    font-family: "Press Start 2P", system-ui;
+    width: 400%; 
+    max-width: 800px; 
+}
+  
+.home-page {
+    padding: 20px;
+  }
+  
