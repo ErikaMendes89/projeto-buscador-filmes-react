@@ -60,6 +60,7 @@ Ele se comunica com uma API backend em Node.js e MongoDB para armazenar e gerenc
   <li><b>title</b>: Título do filme.</li>
   <li><b>overview</b>: Resumo do filme.</li>
   <li><b>poster_path</b>: Caminho para a imagem do cartaz do filme. </li>
+  <li><b>voter_average</b>:para o raating das classificações</li>
 </ul>
 
   
