@@ -109,7 +109,7 @@ Conectado ao MongoDB
 
 ## Problemas Conhecidos
 <ol>
-  <li>API Key: A chave da API TMDB deve ser configurada corretamente no arquivo .env.</li>
+  <li>API Key: A chave da API TMDB deve ser configurada corretamente em um arquivo .env.Igual eu fiz no projeto https://github.com/ErikaMendes89/projeto-recomendacao-de-filmes</li>
   <li>Recarregamento da Página: Ao adicionar/remover um favorito, a página recarrega para refletir as mudanças. Uma melhoria futura pode ser a atualização dinâmica 
    sem recarregar.</li>
   <li>Melhorias que quero adicionar login (tela de caasdtro e tela de login), onde o armazenando dos favoritos seria armazenado individualmente. E comentarios dos 
