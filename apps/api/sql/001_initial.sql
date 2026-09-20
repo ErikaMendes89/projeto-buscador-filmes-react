@@ -13,7 +13,11 @@ INSERT INTO users (id, username, display_name, email, bio)
 VALUES ('00000000-0000-0000-0000-000000000001', 'erika', 'Erika Mendes', 'demo@moviematch.local', 'Ficção científica, suspense e filmes que explodem a cabeça.')
 ON CONFLICT DO NOTHING;
 
-CREATE TYPE interaction_status AS ENUM ('want_to_watch', 'watching', 'watched', 'abandoned', 'favorite');
+DO $$ BEGIN
+  CREATE TYPE interaction_status AS ENUM ('want_to_watch', 'watching', 'watched', 'abandoned', 'favorite');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS movie_interactions (
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,

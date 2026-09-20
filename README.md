@@ -28,7 +28,18 @@ apps/web  (React + TypeScript + TanStack Query)
           └── PostgreSQL (dados sociais)
 ```
 
-O backend é um monólito modular. Microserviços só serão considerados se volume ou autonomia de times justificarem a separação.
+O backend é um monólito modular. Cada domínio possui rotas, serviços, contratos e repositórios próprios:
+
+```text
+apps/api/src/modules/
+├── auth/       sessão e identidade autenticada
+├── users/      perfis públicos
+├── movies/     catálogo TMDB e interações
+├── reviews/    notas e resenhas
+└── social/     follows e feed
+```
+
+`container.ts` é a raiz de composição: instancia os repositórios e injeta as dependências nos serviços. As rotas não executam SQL diretamente. Microserviços só serão considerados se volume ou autonomia de times justificarem a separação.
 
 ## Executar localmente
 
@@ -38,6 +49,7 @@ Requisitos: Node.js 22+, npm 10+ e Docker.
 cp .env.example .env
 docker compose up -d
 npm install
+npm run db:migrate -w @moviematch/api
 npm run dev
 ```
 
@@ -64,12 +76,18 @@ Esse comando valida os tipos, executa os testes e gera os builds de produção d
 | `GET` | `/api/me/interactions` | Interações do perfil atual |
 | `PUT` | `/api/me/interactions/:movieId` | Criar ou atualizar interação |
 | `DELETE` | `/api/me/interactions/:movieId` | Remover interação |
+| `GET` | `/api/auth/session` | Sessão atual |
+| `GET` | `/api/users/:username` | Perfil público |
+| `GET` | `/api/movies/:movieId/reviews` | Resenhas de um filme |
+| `PUT` | `/api/movies/:movieId/reviews/me` | Publicar a própria resenha |
+| `GET` | `/api/feed` | Feed do usuário atual |
+| `PUT/DELETE` | `/api/users/:userId/follow` | Seguir ou deixar de seguir |
 
 Nesta fundação existe um usuário local de demonstração. Autenticação substituirá esse identificador fixo no próximo marco; ele não é uma solução de produção.
 
 ## Roadmap
 
-- **v1.0 — fundação:** monorepo, TypeScript, Vite, API, PostgreSQL, Docker e CI.
+- **v1.0 — fundação:** monorepo, TypeScript, Vite, API modular, PostgreSQL, Docker e CI.
 - **v1.1 — identidade:** cadastro, login, sessões seguras e perfil.
 - **v1.2 — diário de filmes:** avaliações, reviews e histórico.
 - **v2.0 — social:** seguir pessoas, feed, curtidas, comentários e listas.
@@ -85,4 +103,3 @@ Nesta fundação existe um usuário local de demonstração. Autenticação subs
 - IA e `pgvector` entram apenas depois de existirem dados e métricas que justifiquem recomendação personalizada.
 
 Este produto usa a API da TMDB, mas não é endossado ou certificado pela TMDB.
-
