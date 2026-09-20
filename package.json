@@ -1,0 +1,17 @@
+{
+  "name": "movie-match",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "concurrently -n api,web -c magenta,cyan \"npm run dev -w @moviematch/api\" \"npm run dev -w @moviematch/web\"",
+    "build": "npm run build -w @moviematch/api && npm run build -w @moviematch/web",
+    "test": "npm run test -w @moviematch/api && npm run test -w @moviematch/web",
+    "lint": "npm run lint -w @moviematch/api && npm run lint -w @moviematch/web",
+    "check": "npm run lint && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "engines": { "node": ">=22" }
+}
