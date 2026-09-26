@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../shared/http.js';
 import { requireSession } from '../auth/auth.middleware.js';
+import type { AuthService } from '../auth/auth.service.js';
 import type { ReviewsService } from './reviews.service.js';
 
 const createReviewSchema = z.object({
@@ -11,7 +12,7 @@ const createReviewSchema = z.object({
   body: z.string().trim().max(2000).nullable().optional(),
 });
 
-export function createReviewsRouter(service: ReviewsService) {
+export function createReviewsRouter(service: ReviewsService, auth: AuthService) {
   const router = Router();
 
   router.get('/movies/:movieId/reviews', asyncHandler(async (request, response) => {
@@ -19,7 +20,12 @@ export function createReviewsRouter(service: ReviewsService) {
     response.json({ data: await service.listForMovie(movieId) });
   }));
 
-  router.put('/movies/:movieId/reviews/me', requireSession, asyncHandler(async (request, response) => {
+  router.get('/movies/:movieId/reviews/me', requireSession(auth), asyncHandler(async (request, response) => {
+    const movieId = z.coerce.number().int().positive().parse(request.params.movieId);
+    response.json({ data: await service.findMine(response.locals.userId as string, movieId) });
+  }));
+
+  router.put('/movies/:movieId/reviews/me', requireSession(auth), asyncHandler(async (request, response) => {
     const movieId = z.coerce.number().int().positive().parse(request.params.movieId);
     const input = createReviewSchema.parse(request.body);
     const review = await service.publish(response.locals.userId as string, {
@@ -28,7 +34,13 @@ export function createReviewsRouter(service: ReviewsService) {
       posterPath: input.posterPath ?? null,
       body: input.body ?? null,
     });
-    response.status(201).json({ data: review });
+    response.json({ data: review });
+  }));
+
+  router.delete('/movies/:movieId/reviews/me', requireSession(auth), asyncHandler(async (request, response) => {
+    const movieId = z.coerce.number().int().positive().parse(request.params.movieId);
+    await service.removeMine(response.locals.userId as string, movieId);
+    response.status(204).send();
   }));
 
   return router;

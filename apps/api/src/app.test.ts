@@ -18,5 +18,6 @@ describe('API', () => {
     const response = await request(app).get('/api/movies');
     expect(response.status).toBe(200);
     expect(response.body.data.length).toBeGreaterThan(0);
+    expect(response.body.data.every((movie: { posterPath: string | null }) => movie.posterPath)).toBe(true);
   });
 });

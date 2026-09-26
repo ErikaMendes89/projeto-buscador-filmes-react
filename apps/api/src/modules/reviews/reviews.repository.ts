@@ -3,7 +3,9 @@ import type { CreateReview, Review } from './reviews.types.js';
 
 export interface ReviewsRepository {
   listByMovie(movieId: number): Promise<Review[]>;
+  findByUserAndMovie(userId: string, movieId: number): Promise<Review | null>;
   upsert(userId: string, review: CreateReview): Promise<Review>;
+  remove(userId: string, movieId: number): Promise<void>;
 }
 
 export class PgReviewsRepository implements ReviewsRepository {
@@ -21,6 +23,18 @@ export class PgReviewsRepository implements ReviewsRepository {
     return result.rows;
   }
 
+  async findByUserAndMovie(userId: string, movieId: number): Promise<Review | null> {
+    const result = await this.db.query(
+      `SELECT r.id, r.movie_id AS "movieId", r.title, r.rating::float, r.body,
+              json_build_object('username', u.username, 'displayName', u.display_name) AS author,
+              r.created_at AS "createdAt"
+       FROM reviews r JOIN users u ON u.id = r.user_id
+       WHERE r.user_id = $1 AND r.movie_id = $2`,
+      [userId, movieId],
+    );
+    return result.rows[0] ?? null;
+  }
+
   async upsert(userId: string, review: CreateReview): Promise<Review> {
     const result = await this.db.query(
       `INSERT INTO reviews (user_id, movie_id, title, poster_path, rating, body)
@@ -32,5 +46,9 @@ export class PgReviewsRepository implements ReviewsRepository {
     );
     const user = await this.db.query('SELECT username, display_name AS "displayName" FROM users WHERE id = $1', [userId]);
     return { ...result.rows[0], author: user.rows[0] };
+  }
+
+  async remove(userId: string, movieId: number): Promise<void> {
+    await this.db.query('DELETE FROM reviews WHERE user_id = $1 AND movie_id = $2', [userId, movieId]);
   }
 }

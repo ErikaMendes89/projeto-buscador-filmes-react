@@ -1,5 +1,8 @@
 import { pool } from './db.js';
+import { config } from './config.js';
 import { AuthService } from './modules/auth/auth.service.js';
+import { PgAuthRepository } from './modules/auth/auth.repository.js';
+import { UnconfiguredPasswordResetMailer } from './modules/auth/password-reset-mailer.js';
 import { PgInteractionsRepository } from './modules/movies/interactions.repository.js';
 import { MoviesService } from './modules/movies/movies.service.js';
 import { TmdbClient } from './modules/movies/tmdb.client.js';
@@ -16,7 +19,7 @@ const reviewsRepository = new PgReviewsRepository(pool);
 const socialRepository = new PgSocialRepository(pool);
 
 export const services = {
-  auth: new AuthService(usersRepository),
+  auth: new AuthService(usersRepository, new PgAuthRepository(pool), new UnconfiguredPasswordResetMailer(), config.WEB_ORIGIN),
   users: new UsersService(usersRepository),
   movies: new MoviesService(new TmdbClient(), interactionsRepository),
   reviews: new ReviewsService(reviewsRepository),

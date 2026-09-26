@@ -72,20 +72,39 @@ Esse comando valida os tipos, executa os testes e gera os builds de produção d
 | Método | Rota | Uso |
 |---|---|---|
 | `GET` | `/health` | Saúde da API |
-| `GET` | `/api/movies?q=` | Descoberta e busca de filmes |
-| `GET` | `/api/me/interactions` | Interações do perfil atual |
-| `PUT` | `/api/me/interactions/:movieId` | Criar ou atualizar interação |
-| `DELETE` | `/api/me/interactions/:movieId` | Remover interação |
+| `GET` | `/api/movies?q=&page=&year=&genre=` | Busca/descoberta paginada (gênero só na descoberta) |
+| `GET` | `/api/movies/genres` | Gêneros do catálogo |
+| `GET` | `/api/movies/:movieId` | Detalhes do filme |
+| `GET` | `/api/me/interactions` | Listar filmes da própria conta (sessão obrigatória) |
+| `PUT` | `/api/me/interactions/:movieId` | Incluir filme ou atualizar status/favorito da própria conta |
+| `DELETE` | `/api/me/interactions/:movieId` | Remover filme da própria conta (sessão obrigatória) |
 | `GET` | `/api/auth/session` | Sessão atual |
-| `GET` | `/api/users/:username` | Perfil público |
+| `POST` | `/api/auth/register` | Solicitar cadastro (resposta genérica; depois, entrar pelo login) |
+| `POST` | `/api/auth/login` | Iniciar sessão |
+| `POST` | `/api/auth/logout` | Revogar a sessão atual |
+| `POST` | `/api/auth/password-reset` | Solicitar recuperação sem revelar se o e-mail existe |
+| `POST` | `/api/auth/password-reset/confirm` | Redefinir senha com token de uso único |
+| `GET` | `/api/users/:username` | Perfil público (username, nome, bio e data de criação; sem ID, e-mail ou sessão) |
+| `PUT` | `/api/users/me` | Editar nome, username e bio da conta autenticada |
+| `GET` | `/api/users/:username/list` | Lista pública (retorna 404 se privada) |
+| `GET` | `/api/users/:username/common` | Filmes em comum com uma lista pública (requer sessão) |
+| `GET/PUT` | `/api/me/list-visibility` | Consultar ou alterar visibilidade da própria lista |
 | `GET` | `/api/movies/:movieId/reviews` | Resenhas de um filme |
 | `PUT` | `/api/movies/:movieId/reviews/me` | Publicar a própria resenha |
 | `GET` | `/api/feed` | Feed do usuário atual |
 | `PUT/DELETE` | `/api/users/:userId/follow` | Seguir ou deixar de seguir |
 
-Nesta fundação existe um usuário local de demonstração. Autenticação substituirá esse identificador fixo no próximo marco; ele não é uma solução de produção.
+O `PUT` recebe `{ "title": "...", "posterPath": null, "status": "want_to_watch", "isFavorite": false }`; os status válidos são `want_to_watch`, `watching`, `watched` e `abandoned`. `isFavorite` é opcional e, quando omitido numa atualização, o valor salvo é preservado. A combinação única por conta e filme transforma inclusões repetidas em atualização, sem criar duplicatas.
+
+A conta local de demonstração permanece como dado inicial sem senha: não pode iniciar sessão e não é retornada como perfil público. Todas as operações pessoais usam o usuário resolvido pela sessão validada no backend; nenhum identificador de demonstração é enviado pelo cliente.
+
+A recuperação cria token aleatório de uso único, guarda apenas o hash e expira em 30 minutos. A aplicação contém a interface `PasswordResetMailer`, mas o envio não está configurado por padrão. Para produção, escolha e configure um serviço transacional de e-mail (SMTP ou API), implemente o adaptador e remetente verificado; nunca registre senha, token ou URL de recuperação nos logs. A migration `007_password_reset_tokens.sql` precisa ser aplicada antes de habilitar o fluxo.
+
+Listas são privadas por padrão. Tornar uma lista pública publica seus filmes, status e favoritos; notas e textos pessoais da lista não são expostos. Uma resenha publicada é pública na página do filme e pode aparecer no feed de quem segue a pessoa, mesmo que a lista permaneça privada.
 
 ## Roadmap
+
+O [planejamento do MVP e checklist de execução para Luna](docs/PLANO_MVP_LUNA.md) detalha as tarefas, dependências e critérios de aceite para buscador, login, perfil, minha lista, comunidade, compartilhamento e chat.
 
 - **v1.0 — fundação:** monorepo, TypeScript, Vite, API modular, PostgreSQL, Docker e CI.
 - **v1.1 — identidade:** cadastro, login, sessões seguras e perfil.

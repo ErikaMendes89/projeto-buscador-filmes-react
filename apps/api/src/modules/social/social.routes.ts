@@ -2,11 +2,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../shared/http.js';
 import { requireSession } from '../auth/auth.middleware.js';
+import type { AuthService } from '../auth/auth.service.js';
 import type { SocialService } from './social.service.js';
 
-export function createSocialRouter(service: SocialService) {
+export function createSocialRouter(service: SocialService, auth: AuthService) {
   const router = Router();
-  router.use(requireSession);
+  router.use(requireSession(auth));
 
   router.get('/feed', asyncHandler(async (_request, response) => {
     response.json({ data: await service.getFeed(response.locals.userId as string) });
