@@ -1,7 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { confirmPasswordReset, getCommonMovies, getListVisibility, getMovieReviews, getMyInteractions, getMyReview, getPublicList, getPublicProfile, removeMyInteraction, removeMyReview, requestPasswordReset, saveMyInteraction, saveMyReview, setListVisibility, updateMyProfile } from './api';
+import { confirmPasswordReset, getCommonMovies, getFeed, getFollowStatus, getListVisibility, getMovieReviews, getMyInteractions, getMyReview, getPublicList, getPublicProfile, removeMyInteraction, removeMyReview, requestPasswordReset, saveMyInteraction, saveMyReview, searchPeople, setFollowing, setListVisibility, updateMyProfile } from './api';
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe('community feed API', () => {
+  it('loads a requested feed page with its pagination metadata and session', async () => {
+    const review = { id: 'review-1', movieId: 10, title: 'Filme', posterPath: null, rating: 4, body: null, author: { username: 'alice', displayName: 'Alice' }, createdAt: '2026-01-01' };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, status: 200, json: async () => ({ data: [review], pagination: { page: 2, totalPages: 3, totalResults: 45 } }) }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getFeed(2)).resolves.toEqual({ items: [review], page: 2, totalPages: 3, totalResults: 45 });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/feed?page=2');
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: 'include' });
+  });
+});
 
 describe('movie interaction API', () => {
   it('reads the signed-in user list with session cookies', async () => {
@@ -98,6 +110,25 @@ describe('profile API', () => {
     await expect(updateMyProfile({ username: 'alice_2', displayName: 'Alice Example', bio: 'Filmes' })).resolves.toEqual(updated);
     expect(fetchMock.mock.calls[0]).toEqual([expect.stringContaining('/api/users/alice')]);
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: 'PUT', credentials: 'include', body: JSON.stringify({ username: 'alice_2', displayName: 'Alice Example', bio: 'Filmes' }) });
+  });
+
+  it('searches paginated profiles and follows or unfollows by username with session cookies', async () => {
+    const profiles = [{ username: 'alice', displayName: 'Alice', bio: null, createdAt: '2026-01-01T00:00:00.000Z' }];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: profiles, pagination: { page: 2, totalPages: 3, totalResults: 45 } }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: { following: true } }) })
+      .mockResolvedValueOnce({ ok: true, status: 204 })
+      .mockResolvedValueOnce({ ok: true, status: 204 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(searchPeople('ali', 2)).resolves.toEqual({ items: profiles, page: 2, totalPages: 3, totalResults: 45 });
+    await expect(getFollowStatus('alice')).resolves.toEqual({ following: true });
+    await expect(setFollowing('alice', false)).resolves.toBeUndefined();
+    await expect(setFollowing('alice', true)).resolves.toBeUndefined();
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/users/search?q=ali&page=2');
+    expect(fetchMock.mock.calls[1]).toEqual([expect.stringContaining('/api/users/by-username/alice/follow'), { credentials: 'include' }]);
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: 'DELETE', credentials: 'include' });
+    expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({ method: 'PUT', credentials: 'include' });
   });
 });
 

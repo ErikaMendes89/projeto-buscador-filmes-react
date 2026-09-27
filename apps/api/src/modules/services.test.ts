@@ -15,6 +15,7 @@ const user = { id: 'user-1', username: 'erika', displayName: 'Erika', bio: null,
 const users: UsersRepository = {
   findById: vi.fn(async () => user),
   findByUsername: vi.fn(async () => user),
+  searchByUsername: vi.fn(async () => ({ items: [user], totalResults: 1 })),
   findAccountByEmail: vi.fn(async () => null),
   createAccount: vi.fn(async () => user),
   updateProfile: vi.fn(async (_id, input) => ({ ...user, ...input })),
@@ -68,7 +69,32 @@ describe('module services', () => {
   });
 
   it('rejects self-follow inside the social domain', () => {
-    const social: SocialRepository = { follow: vi.fn(), unfollow: vi.fn(), getFeed: vi.fn(async () => []) };
+    const social: SocialRepository = {
+      findUserIdByUsername: vi.fn(async () => null),
+      isFollowing: vi.fn(async () => false),
+      follow: vi.fn(),
+      unfollow: vi.fn(),
+      getFeed: vi.fn(async () => ({ items: [], totalResults: 0 })),
+    };
     expect(() => new SocialService(social).follow(user.id, user.id)).toThrow('seguir o próprio perfil');
+  });
+
+  it('resolves username targets for follow status and changes', async () => {
+    const social: SocialRepository = {
+      findUserIdByUsername: vi.fn(async (username) => username === 'alice' ? 'target-1' : null),
+      isFollowing: vi.fn(async () => true),
+      follow: vi.fn(async () => undefined),
+      unfollow: vi.fn(async () => undefined),
+      getFeed: vi.fn(async () => ({ items: [], totalResults: 0 })),
+    };
+    const service = new SocialService(social);
+
+    await expect(service.getFollowStatus(user.id, 'alice')).resolves.toEqual({ following: true });
+    await service.followByUsername(user.id, 'alice');
+    await service.unfollowByUsername(user.id, 'alice');
+    expect(social.isFollowing).toHaveBeenCalledWith(user.id, 'target-1');
+    expect(social.follow).toHaveBeenCalledWith(user.id, 'target-1');
+    expect(social.unfollow).toHaveBeenCalledWith(user.id, 'target-1');
+    await expect(service.followByUsername(user.id, 'missing')).rejects.toMatchObject({ statusCode: 404, code: 'not_found' });
   });
 });

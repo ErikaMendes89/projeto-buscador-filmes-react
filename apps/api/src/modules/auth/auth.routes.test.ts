@@ -5,6 +5,7 @@ import { createAuthRouter } from './auth.routes.js';
 import { requireSameOrigin } from './auth.middleware.js';
 import type { AuthService } from './auth.service.js';
 import { errorHandler } from '../../shared/error-handler.js';
+import { AppError } from '../../shared/errors.js';
 
 const user = { id: 'user-1', username: 'alice', displayName: 'Alice', bio: null, createdAt: new Date('2026-01-01T00:00:00Z') };
 
@@ -52,6 +53,38 @@ describe('auth routes', () => {
     expect(limited.body).toEqual({ error: 'Muitas tentativas. Tente novamente mais tarde.', code: 'rate_limited' });
     expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
     expect(service.login).toHaveBeenCalledTimes(10);
+  });
+
+  it('returns the generic invalid-credentials response for an incorrect password', async () => {
+    const { app, service } = makeApp();
+    vi.mocked(service.login).mockRejectedValueOnce(new AppError('E-mail ou senha inválidos', 401, 'invalid_credentials'));
+    const response = await request(app)
+      .post('/api/auth/login')
+      .set('Origin', 'http://localhost:5173')
+      .send({ email: 'alice@example.com', password: 'incorrect-password' });
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({ error: 'E-mail ou senha inválidos', code: 'invalid_credentials' });
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('rejects an expired session and clears the cookie on logout', async () => {
+    const { app, service } = makeApp();
+    vi.mocked(service.resolveSession).mockImplementation(async (token) => token === 'live-session' ? user.id : null);
+    const expired = await request(app)
+      .get('/api/auth/session')
+      .set('Cookie', 'moviematch_session=expired-session');
+    expect(expired.status).toBe(401);
+    expect(expired.body.code).toBe('unauthorized');
+
+    const logout = await request(app)
+      .post('/api/auth/logout')
+      .set('Origin', 'http://localhost:5173')
+      .set('Cookie', 'moviematch_session=live-session');
+    expect(logout.status).toBe(204);
+    expect(logout.headers['set-cookie']?.[0]).toContain('moviematch_session=;');
+    expect(logout.headers['set-cookie']?.[0]).toContain('Max-Age=0');
+    expect(service.revokeSession).toHaveBeenCalledWith('live-session');
   });
 
   it('limits account creation attempts per IP', async () => {

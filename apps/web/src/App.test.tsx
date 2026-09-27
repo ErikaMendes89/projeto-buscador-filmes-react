@@ -69,6 +69,72 @@ describe('MovieMatch home', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/auth/login'), expect.objectContaining({ credentials: 'include', method: 'POST' })));
   });
 
+  it('returns to the requested same-site page after login', async () => {
+    let loggedIn = false;
+    const movie = { id: 157336, title: 'Interestelar', overview: 'Uma viagem espacial.', posterPath: null, releaseDate: '2014-11-05', rating: 8.5, genreIds: [878], genres: [{ id: 878, name: 'Ficção científica' }] };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/auth/session')) return loggedIn ? { ok: true, status: 200, json: async () => ({ data: { user: signedInUser } }) } as Response : { ok: false, status: 401, json: async () => ({}) } as Response;
+      if (url.includes('/api/auth/login') && init?.method === 'POST') {
+        loggedIn = true;
+        return { ok: true, status: 200, json: async () => ({}) } as Response;
+      }
+      if (url.endsWith('/api/movies/157336')) return { ok: true, status: 200, json: async () => ({ data: movie, meta: { catalogMode: 'demo' } }) } as Response;
+      if (url.includes('/api/movies/157336/reviews')) return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+      return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState(null, '', '/login?returnTo=%2Fmovies%2F157336%3Ffrom%3Dlist%23reviews');
+    renderApp();
+
+    fireEvent.change(await screen.findByLabelText('E-mail'), { target: { value: 'alice@example.com' } });
+    fireEvent.change(screen.getByLabelText('Senha'), { target: { value: 'correct-password' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Entrar' }));
+
+    expect(await screen.findByRole('heading', { name: 'Interestelar' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/movies/157336');
+    expect(window.location.search).toBe('?from=list');
+    expect(window.location.hash).toBe('#reviews');
+  });
+
+  it('does not redirect login to an external return target', async () => {
+    let loggedIn = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/auth/session')) return loggedIn ? { ok: true, status: 200, json: async () => ({ data: { user: signedInUser } }) } as Response : { ok: false, status: 401, json: async () => ({}) } as Response;
+      if (url.includes('/api/auth/login') && init?.method === 'POST') {
+        loggedIn = true;
+        return { ok: true, status: 200, json: async () => ({}) } as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState(null, '', '/login?returnTo=https%3A%2F%2Fevil.example%2F');
+    renderApp();
+
+    fireEvent.change(await screen.findByLabelText('E-mail'), { target: { value: 'alice@example.com' } });
+    fireEvent.change(screen.getByLabelText('Senha'), { target: { value: 'correct-password' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Entrar' }));
+
+    expect(await screen.findByRole('heading', { name: 'Minha lista' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/my-list');
+  });
+
+  it('shows clear login errors returned by the API', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/api/auth/session')) return { ok: false, status: 401, json: async () => ({}) } as Response;
+      if (String(input).includes('/api/auth/login') && init?.method === 'POST') return { ok: false, status: 401, json: async () => ({ error: 'Credenciais inválidas.' }) } as Response;
+      return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+    });
+    renderApp();
+    fireEvent.click(await screen.findByRole('button', { name: 'Entrar' }));
+    fireEvent.change(await screen.findByLabelText('E-mail'), { target: { value: 'alice@example.com' } });
+    fireEvent.change(screen.getByLabelText('Senha'), { target: { value: 'wrong-password' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Entrar' }));
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('Credenciais inválidas.');
+  });
+
   it('shows a generic notice after requesting account creation and returns to login', async () => {
     const fetchMock = vi.mocked(fetch);
     renderApp();
@@ -207,6 +273,83 @@ describe('MovieMatch home', () => {
     renderApp();
     expect(await screen.findByRole('heading', { name: 'Entre para continuar' })).toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('searches paginated people and opens public profile links', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), window.location.origin);
+      if (url.pathname.endsWith('/api/auth/session')) return { ok: false, status: 401, json: async () => ({}) } as Response;
+      if (url.pathname.endsWith('/api/users/search')) {
+        const page = Number(url.searchParams.get('page'));
+        const profile = page === 1
+          ? { username: 'alice', displayName: 'Alice Example', bio: 'Cinema', createdAt: '2026-01-01' }
+          : { username: 'alice_2', displayName: 'Alice Dois', bio: null, createdAt: '2026-01-02' };
+        return { ok: true, status: 200, json: async () => ({ data: [profile], pagination: { page, totalPages: 2, totalResults: 21 } }) } as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState(null, '', '/community');
+    renderApp();
+
+    fireEvent.change(await screen.findByRole('searchbox', { name: 'Username' }), { target: { value: 'ali' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar pessoas' }));
+    expect(await screen.findByRole('link', { name: /alice example.*@alice/i })).toHaveAttribute('href', '/users/alice');
+    expect(screen.getByText('Página 1 de 2')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Próxima' }));
+    expect(await screen.findByRole('link', { name: /alice dois.*@alice_2/i })).toHaveAttribute('href', '/users/alice_2');
+    expect(window.location.search).toBe('?q=ali&page=2');
+  });
+
+  it('paginates the followed review feed and preserves the page in direct URLs', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), window.location.origin);
+      if (url.pathname.endsWith('/api/auth/session')) return { ok: true, status: 200, json: async () => ({ data: { user: signedInUser } }) } as Response;
+      if (url.pathname.endsWith('/api/feed')) {
+        const page = Number(url.searchParams.get('page'));
+        const review = { id: `review-${page}`, movieId: 10, title: `Filme da página ${page}`, posterPath: null, rating: 4, body: null, author: { username: 'alice', displayName: 'Alice' }, createdAt: '2026-01-01' };
+        return { ok: true, status: 200, json: async () => ({ data: [review], pagination: { page, totalPages: 2, totalResults: 21 } }) } as Response;
+      }
+      if (url.pathname.endsWith('/api/users/search')) return { ok: true, status: 200, json: async () => ({ data: [], pagination: { page: 2, totalPages: 1, totalResults: 0 } }) } as Response;
+      return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState(null, '', '/community?q=ali&page=2&feedPage=2');
+    renderApp();
+
+    expect(await screen.findByRole('heading', { name: 'Filme da página 2' })).toBeInTheDocument();
+    expect(screen.getByText('Página 2 de 2 · 21 resenhas')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Anterior' }));
+    expect(await screen.findByRole('heading', { name: 'Filme da página 1' })).toBeInTheDocument();
+    expect(window.location.search).toBe('?q=ali&page=2');
+  });
+
+  it('lets an authenticated visitor follow and unfollow a public profile', async () => {
+    let following = true;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/auth/session')) return { ok: true, status: 200, json: async () => ({ data: { user: { ...signedInUser, username: 'viewer' } } }) } as Response;
+      if (url.endsWith('/api/users/alice')) return { ok: true, status: 200, json: async () => ({ data: { username: 'alice', displayName: 'Alice Example', bio: 'Cinema', createdAt: '2026-01-01', followersCount: 12, followingCount: 7 } }) } as Response;
+      if (url.endsWith('/api/users/alice/list')) return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+      if (url.endsWith('/api/users/by-username/alice/follow')) {
+        if (init?.method === 'DELETE') following = false;
+        if (init?.method === 'PUT') following = true;
+        return init?.method ? { ok: true, status: 204 } as Response : { ok: true, status: 200, json: async () => ({ data: { following } }) } as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState(null, '', '/users/alice');
+    renderApp();
+
+    expect(await screen.findByText('12 seguidores')).toBeInTheDocument();
+    expect(screen.getByText('7 seguindo')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Deixar de seguir' }));
+    expect(await screen.findByRole('button', { name: 'Seguir' })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/users/by-username/alice/follow'), expect.objectContaining({ method: 'DELETE', credentials: 'include' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Seguir' }));
+    expect(await screen.findByRole('button', { name: 'Deixar de seguir' })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/users/by-username/alice/follow'), expect.objectContaining({ method: 'PUT', credentials: 'include' }));
   });
 
   it('lets the signed-in profile owner edit their name, username, and bio', async () => {
@@ -443,5 +586,34 @@ describe('MovieMatch home', () => {
     fireEvent.click(commonButton);
     expect(await screen.findByText('1 filme em comum.')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/users/alice/common'), { credentials: 'include' });
+  });
+
+  it('hides cached common movies when a fresh authorization check denies access', async () => {
+    const item = { movieId: 10, title: 'Filme compartilhado', posterPath: null, status: 'watched', isFavorite: false };
+    let commonRequests = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/auth/session')) return { ok: true, status: 200, json: async () => ({ data: { user: signedInUser } }) } as Response;
+      if (url.includes('/api/users/alice/list')) return { ok: true, status: 200, json: async () => ({ data: [item] }) } as Response;
+      if (url.includes('/api/users/alice/common')) {
+        commonRequests += 1;
+        return commonRequests === 1
+          ? { ok: true, status: 200, json: async () => ({ data: [item] }) } as Response
+          : { ok: false, status: 404, json: async () => ({ error: 'Lista não encontrada' }) } as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({ error: 'Não encontrado' }) } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState(null, '', '/users/alice/list');
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver filmes em comum' }));
+    expect(await screen.findByRole('heading', { name: 'Filmes em comum' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Ocultar filmes em comum' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ver filmes em comum' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Lista não encontrada');
+    expect(screen.queryByRole('heading', { name: 'Filmes em comum' })).not.toBeInTheDocument();
+    expect(screen.queryByText('1 filme em comum.')).not.toBeInTheDocument();
   });
 });

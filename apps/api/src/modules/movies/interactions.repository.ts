@@ -42,7 +42,7 @@ export class PgInteractionsRepository implements InteractionsRepository {
       `SELECT u.list_is_public AS "isPublic", mi.movie_id::float8 AS "movieId", mi.title,
               mi.poster_path AS "posterPath", mi.status, mi.is_favorite AS "isFavorite"
        FROM users u LEFT JOIN movie_interactions mi ON mi.user_id = u.id AND u.list_is_public
-       WHERE u.username = $1 ORDER BY mi.updated_at DESC NULLS LAST`,
+       WHERE u.username = $1 AND u.password_hash IS NOT NULL ORDER BY mi.updated_at DESC NULLS LAST`,
       [username],
     );
     if (!result.rows.length || !result.rows[0]!.isPublic) return null;
@@ -51,7 +51,7 @@ export class PgInteractionsRepository implements InteractionsRepository {
 
   async listCommonWithPublicUser(userId: string, username: string): Promise<{ isPublic: boolean; items: MovieInteraction[] } | null> {
     const result = await this.db.query<{ isPublic: boolean; matched: boolean; movieId: number | null; title: string | null; posterPath: string | null; status: MovieInteraction['status'] | null; isFavorite: boolean | null }>(
-      `WITH target AS (SELECT id, list_is_public FROM users WHERE username = $2)
+      `WITH target AS (SELECT id, list_is_public FROM users WHERE username = $2 AND password_hash IS NOT NULL)
        SELECT target.list_is_public AS "isPublic", (mine.movie_id IS NOT NULL) AS matched,
               other.movie_id::float8 AS "movieId", other.title,
               other.poster_path AS "posterPath", other.status, other.is_favorite AS "isFavorite"

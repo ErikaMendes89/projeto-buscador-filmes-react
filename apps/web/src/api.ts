@@ -24,10 +24,12 @@ export type MovieInteraction = {
 };
 
 export type SessionUser = { id: string; username: string; displayName: string; bio: string | null; createdAt: string };
-export type PublicProfile = Omit<SessionUser, 'id'>;
+export type PublicProfile = Omit<SessionUser, 'id'> & { followersCount?: number; followingCount?: number };
+export type PeoplePage = { items: PublicProfile[]; page: number; totalPages: number; totalResults: number };
 export type Review = { id: string; movieId: number; title: string; rating: number; body: string | null; author: { username: string; displayName: string }; createdAt: string };
 export type ListVisibility = { isPublic: boolean };
 export type FeedReview = Review & { posterPath: string | null };
+export type FeedPage = { items: FeedReview[]; page: number; totalPages: number; totalResults: number };
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3333';
 
@@ -207,6 +209,34 @@ export async function getPublicProfile(username: string): Promise<PublicProfile>
   return payload.data;
 }
 
+export async function searchPeople(query: string, page: number, signal?: AbortSignal): Promise<PeoplePage> {
+  const url = new URL('/api/users/search', API_URL);
+  url.searchParams.set('q', query);
+  url.searchParams.set('page', String(page));
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw await errorFromResponse(response, 'Não foi possível buscar pessoas.');
+  const payload = (await response.json()) as {
+    data: PublicProfile[];
+    pagination: { page: number; totalPages: number; totalResults: number };
+  };
+  return { items: payload.data, ...payload.pagination };
+}
+
+export async function getFollowStatus(username: string): Promise<{ following: boolean }> {
+  const response = await fetch(`${API_URL}/api/users/by-username/${encodeURIComponent(username)}/follow`, { credentials: 'include' });
+  if (!response.ok) throw await errorFromResponse(response, 'Não foi possível consultar se você segue este perfil.');
+  const payload = (await response.json()) as { data: { following: boolean } };
+  return payload.data;
+}
+
+export async function setFollowing(username: string, following: boolean): Promise<void> {
+  const response = await fetch(`${API_URL}/api/users/by-username/${encodeURIComponent(username)}/follow`, {
+    method: following ? 'PUT' : 'DELETE',
+    credentials: 'include',
+  });
+  if (!response.ok) throw await errorFromResponse(response, following ? 'Não foi possível seguir este perfil.' : 'Não foi possível deixar de seguir este perfil.');
+}
+
 export async function updateMyProfile(input: { username: string; displayName: string; bio: string | null }): Promise<PublicProfile> {
   const response = await fetch(`${API_URL}/api/users/me`, {
     method: 'PUT',
@@ -219,9 +249,11 @@ export async function updateMyProfile(input: { username: string; displayName: st
   return payload.data.user;
 }
 
-export async function getFeed(): Promise<FeedReview[]> {
-  const response = await fetch(`${API_URL}/api/feed`, { credentials: 'include' });
+export async function getFeed(page: number, signal?: AbortSignal): Promise<FeedPage> {
+  const url = new URL('/api/feed', API_URL);
+  url.searchParams.set('page', String(page));
+  const response = await fetch(url, { credentials: 'include', signal });
   if (!response.ok) throw await errorFromResponse(response, 'Não foi possível carregar o feed.');
-  const payload = (await response.json()) as { data: FeedReview[] };
-  return payload.data;
+  const payload = (await response.json()) as { data: FeedReview[]; pagination: Omit<FeedPage, 'items'> };
+  return { items: payload.data, ...payload.pagination };
 }

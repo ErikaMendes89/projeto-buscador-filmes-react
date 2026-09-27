@@ -43,8 +43,80 @@ describe('PgInteractionsRepository', () => {
     const publicListSql = String(vi.mocked(db.query).mock.calls[1]![0]);
     expect(publicListSql).toContain('u.list_is_public');
     expect(publicListSql).toContain('AND u.list_is_public');
+    expect(publicListSql).toContain('u.password_hash IS NOT NULL');
     const commonSql = String(vi.mocked(db.query).mock.calls[2]![0]);
     expect(commonSql).toContain('target.list_is_public');
+    expect(commonSql).toContain('password_hash IS NOT NULL');
     expect(commonSql).toContain('mine.user_id = $1');
+  });
+
+  it('reads the same persisted rows from a fresh repository context and isolates accounts', async () => {
+    const rows = new Map<string, Record<string, unknown>>();
+    const db = {
+      query: vi.fn(async (sql: string, parameters: unknown[] = []) => {
+        if (sql.includes('INSERT INTO movie_interactions')) {
+          const [userId, movieId, title, posterPath, status, isFavorite] = parameters as [string, number, string, string | null, string, boolean | null];
+          const rowKey = `${userId}:${movieId}`;
+          const previous = rows.get(rowKey);
+          const row = {
+            movieId,
+            title,
+            posterPath,
+            status,
+            isFavorite: isFavorite ?? previous?.isFavorite ?? false,
+            rating: null,
+          };
+          rows.set(rowKey, row);
+          return { rows: [row] };
+        }
+        if (sql.includes('FROM movie_interactions WHERE user_id = $1')) {
+          return { rows: [...rows.entries()].filter(([key]) => key.startsWith(`${parameters[0]}:`)).map(([, row]) => row) };
+        }
+        return { rows: [] };
+      }),
+    } as unknown as Pool;
+    const firstSessionRepository = new PgInteractionsRepository(db);
+    await firstSessionRepository.upsert('user-1', { movieId: 10, title: 'Interestelar', posterPath: null, status: 'watched', isFavorite: true });
+
+    const repositoryAfterNewLogin = new PgInteractionsRepository(db);
+    await expect(repositoryAfterNewLogin.listByUser('user-1')).resolves.toMatchObject([
+      { movieId: 10, title: 'Interestelar', status: 'watched', isFavorite: true },
+    ]);
+    await expect(repositoryAfterNewLogin.listByUser('user-2')).resolves.toEqual([]);
+  });
+
+  it('uses one conflict-safe row for concurrent changes to the same account and movie', async () => {
+    const rows = new Map<string, Record<string, unknown>>();
+    const db = {
+      query: vi.fn(async (sql: string, parameters: unknown[] = []) => {
+        const [userId, movieId, title, posterPath, status, isFavorite] = parameters as [string, number, string, string | null, string, boolean | null];
+        const rowKey = `${userId}:${movieId}`;
+        const previous = rows.get(rowKey);
+        const row = {
+          movieId,
+          title,
+          posterPath,
+          status,
+          isFavorite: isFavorite ?? previous?.isFavorite ?? false,
+          rating: null,
+        };
+        rows.set(rowKey, row);
+        return { rows: [row] };
+      }),
+    } as unknown as Pool;
+    const repository = new PgInteractionsRepository(db);
+
+    await Promise.all([
+      repository.upsert('user-1', { movieId: 10, title: 'Interestelar', posterPath: null, status: 'watching', isFavorite: true }),
+      repository.upsert('user-1', { movieId: 10, title: 'Interestelar', posterPath: null, status: 'watched' }),
+    ]);
+
+    expect(rows.size).toBe(1);
+    expect(rows.get('user-1:10')).toMatchObject({ status: 'watched', isFavorite: true });
+    expect(db.query).toHaveBeenCalledTimes(2);
+    for (const [sql] of vi.mocked(db.query).mock.calls) {
+      expect(String(sql)).toContain('ON CONFLICT (user_id, movie_id) DO UPDATE');
+      expect(String(sql)).toContain('COALESCE($6, movie_interactions.is_favorite)');
+    }
   });
 });

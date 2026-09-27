@@ -1,12 +1,46 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, BookmarkPlus, ChevronLeft, ChevronRight, Compass, Heart, ListVideo, MessageCircle, Search, Share2, Sparkles, Trash2, UserRound, Users, X } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
-import { authenticate, confirmPasswordReset, getCommonMovies, getFeed, getGenres, getListVisibility, getMovie, getMovieReviews, getMovies, getMyInteractions, getMyReview, getPublicList, getPublicProfile, getSession, logout, removeMyInteraction, removeMyReview, requestPasswordReset, saveMyInteraction, saveMyReview, setListVisibility, updateMyProfile, type CatalogFilters, type InteractionStatus, type Movie, type MovieInteraction, type PublicProfile, type Review, type SessionUser } from './api';
+import { authenticate, confirmPasswordReset, getCommonMovies, getFeed, getFollowStatus, getGenres, getListVisibility, getMovie, getMovieReviews, getMovies, getMyInteractions, getMyReview, getPublicList, getPublicProfile, getSession, logout, removeMyInteraction, removeMyReview, requestPasswordReset, saveMyInteraction, saveMyReview, searchPeople, setFollowing, setListVisibility, updateMyProfile, type CatalogFilters, type InteractionStatus, type Movie, type MovieInteraction, type PublicProfile, type Review, type SessionUser } from './api';
 
 type AuthMode = 'login' | 'register' | 'request-reset';
 
-function navigateTo(path: string) {
-  window.history.pushState(null, '', path);
+function navigateTo(path: string, replace = false) {
+  if (replace) window.history.replaceState(null, '', path);
+  else window.history.pushState(null, '', path);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+function safeReturnPath(value: string | null): string {
+  if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/my-list';
+  const destination = new URL(value, window.location.origin);
+  if (destination.origin !== window.location.origin || ['/login', '/reset-password'].includes(destination.pathname.replace(/\/$/, ''))) return '/my-list';
+  return `${destination.pathname}${destination.search}${destination.hash}`;
+}
+
+function loginPathForCurrentPage(): string {
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  const returnTo = safeReturnPath(current);
+  return `/login?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+function writeCommunitySearch(query: string, page: number) {
+  const params = new URLSearchParams(window.location.search);
+  params.delete('q');
+  params.delete('page');
+  if (query) params.set('q', query);
+  if (page > 1) params.set('page', String(page));
+  const search = params.toString();
+  window.history.pushState(null, '', `/community${search ? `?${search}` : ''}`);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+function writeCommunityFeedPage(page: number) {
+  const params = new URLSearchParams(window.location.search);
+  if (page > 1) params.set('feedPage', String(page));
+  else params.delete('feedPage');
+  const search = params.toString();
+  window.history.pushState(null, '', `/community${search ? `?${search}` : ''}`);
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
@@ -52,6 +86,7 @@ function AuthDialog({ mode, onModeChange, onClose, onAuthenticated }: {
           </>}
           <label>E-mail<input type="email" autoComplete="email" required maxLength={320} value={email} onChange={(event) => setEmail(event.target.value)} /></label>
           {mode !== 'request-reset' && <label>Senha<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 12 : 1} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} /></label>}
+          {mode === 'register' && <p className="auth-hint">Use uma senha com pelo menos 12 caracteres e username de 3 a 40 letras, números ou _.</p>}
           {auth.isError && <p className="auth-error" role="alert">{auth.error.message}</p>}
           <button className="auth-submit" type="submit" disabled={auth.isPending}>{auth.isPending ? 'Aguarde…' : mode === 'login' ? 'Entrar' : mode === 'register' ? 'Criar conta' : 'Enviar instruções'}</button>
         </form>
@@ -348,7 +383,7 @@ function MovieDetailsPage({ movieId }: { movieId: number }) {
             saveReview.mutate({ movieId, title: movie.title, posterPath: movie.posterPath, rating: Number(reviewRating), body: reviewBody.trim() || null });
           }}>
             <h3>{myReview.data ? 'Edite sua resenha' : 'Escreva sua resenha'}</h3>
-            <p className="review-public-notice">Ao publicar, sua nota e o texto ficam públicos na página do filme. Pessoas que seguem você também podem ver a resenha no feed. A visibilidade da lista não altera a publicação da resenha.</p>
+            <p className="review-public-notice">Ao publicar, sua nota e o texto ficam públicos na página do filme. Pessoas que seguem você veem a resenha no feed enquanto sua lista estiver pública.</p>
             <label>Nota (0,5 a 5)<select value={reviewRating} onChange={(event) => setReviewRating(event.target.value)}>{[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((rating) => <option key={rating} value={rating}>{rating.toFixed(1)} / 5</option>)}</select></label>
             <label>Texto da resenha <span className="review-limit">{reviewBody.length}/2000</span><textarea value={reviewBody} maxLength={2000} rows={5} onChange={(event) => setReviewBody(event.target.value)} placeholder="O que você achou do filme?" /></label>
             {saveReview.isError && <p className="auth-error" role="alert">{saveReview.error.message}</p>}
@@ -506,8 +541,8 @@ function PublicListPage({ username }: { username: string }) {
   const [showCommon, setShowCommon] = useState(false);
   const queryClient = useQueryClient();
   const session = useSession();
-  const list = useQuery({ queryKey: ['public-list', username], queryFn: () => getPublicList(username) });
-  const common = useQuery({ queryKey: ['common-movies', session.user?.id, username], queryFn: () => getCommonMovies(username), enabled: Boolean(session.user && showCommon) });
+  const list = useQuery({ queryKey: ['public-list', username], queryFn: () => getPublicList(username), refetchInterval: 30_000 });
+  const common = useQuery({ queryKey: ['common-movies', session.user?.id, username], queryFn: () => getCommonMovies(username), enabled: Boolean(session.user && showCommon), refetchInterval: 30_000 });
 
   return <div className="shell">
     <Header user={session.user} onSignIn={() => setAuthMode('login')} onSignOut={session.signOut} signingOut={session.signingOut} />
@@ -515,19 +550,21 @@ function PublicListPage({ username }: { username: string }) {
       <a className="back-link" href="/#discover"><Compass size={18} /> Voltar para descoberta</a>
       <section className="my-list-heading"><p className="eyebrow">LISTA COMPARTILHADA</p><h1>Lista de @{username}</h1><p>Filmes publicados voluntariamente pelo proprietário da lista.</p></section>
       {list.isLoading && <div className="state" role="status">Carregando lista…</div>}
+      {list.isFetching && !list.isLoading && <div className="state" role="status">Verificando disponibilidade da lista…</div>}
       {list.isError && <div className="state error" role="alert">Esta lista é privada ou não está disponível.</div>}
-      {list.data && <>
+      {list.isSuccess && !list.isFetching && list.data && <>
         {session.user && <section className="common-movies-control"><button className="account-button" type="button" onClick={() => setShowCommon((current) => !current)}>{showCommon ? 'Ocultar filmes em comum' : 'Ver filmes em comum'}</button>
           {showCommon && common.isLoading && <span role="status">Carregando…</span>}
+          {showCommon && common.isFetching && !common.isLoading && <span role="status">Verificando autorização…</span>}
           {showCommon && common.isError && <span className="auth-error" role="alert">{common.error.message}</span>}
-          {showCommon && common.data?.length === 0 && <span>Vocês ainda não têm filmes em comum na lista.</span>}
-          {showCommon && common.data && common.data.length > 0 && <span>{common.data.length} {common.data.length === 1 ? 'filme em comum' : 'filmes em comum'}.</span>}
+          {showCommon && common.isSuccess && !common.isFetching && common.data.length === 0 && <span>Vocês ainda não têm filmes em comum na lista.</span>}
+          {showCommon && common.isSuccess && !common.isFetching && common.data.length > 0 && <span>{common.data.length} {common.data.length === 1 ? 'filme em comum' : 'filmes em comum'}.</span>}
         </section>}
         {list.data.length === 0 ? <div className="state">Esta lista ainda não tem filmes.</div> : <div className="my-list-items">{list.data.map((item) => <article className="list-item" key={item.movieId}>
           <a className="list-item-poster" href={`/movies/${item.movieId}`} aria-label={`Ver detalhes de ${item.title}`}><Poster movie={item} /></a>
           <div className="list-item-copy"><p className="eyebrow">LISTA PÚBLICA</p><h2><a href={`/movies/${item.movieId}`}>{item.title}</a></h2><span className="list-item-status">{statusLabels[item.status]}{item.isFavorite ? ' · Favorito' : ''}</span></div>
         </article>)}</div>}
-        {showCommon && common.data && common.data.length > 0 && <section className="common-movies-list"><h2>Filmes em comum</h2><div className="my-list-items">{common.data.map((item) => <article className="list-item" key={item.movieId}><a className="list-item-poster" href={`/movies/${item.movieId}`} aria-label={`Ver detalhes de ${item.title}`}><Poster movie={item} /></a><div className="list-item-copy"><h3><a href={`/movies/${item.movieId}`}>{item.title}</a></h3></div></article>)}</div></section>}
+        {showCommon && common.isSuccess && !common.isFetching && common.data.length > 0 && <section className="common-movies-list"><h2>Filmes em comum</h2><div className="my-list-items">{common.data.map((item) => <article className="list-item" key={item.movieId}><a className="list-item-poster" href={`/movies/${item.movieId}`} aria-label={`Ver detalhes de ${item.title}`}><Poster movie={item} /></a><div className="list-item-copy"><h3><a href={`/movies/${item.movieId}`}>{item.title}</a></h3></div></article>)}</div></section>}
       </>}
     </main>
     <footer><span className="brand"><span>Movie</span>Match</span><p>Descubra. Compartilhe. Dê match.</p></footer>
@@ -537,25 +574,117 @@ function PublicListPage({ username }: { username: string }) {
 
 function CommunityPage() {
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
+  const [peopleInput, setPeopleInput] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '');
+  const [peopleQuery, setPeopleQuery] = useState(() => {
+    const query = new URLSearchParams(window.location.search).get('q') ?? '';
+    return /^[a-zA-Z0-9_]{2,40}$/.test(query) ? query.toLowerCase() : '';
+  });
+  const [peoplePage, setPeoplePage] = useState(() => {
+    const page = Number(new URLSearchParams(window.location.search).get('page') ?? 1);
+    return Number.isInteger(page) && page > 0 && page <= 500 ? page : 1;
+  });
+  const [peopleSearchError, setPeopleSearchError] = useState('');
+  const [feedPage, setFeedPage] = useState(() => {
+    const page = Number(new URLSearchParams(window.location.search).get('feedPage') ?? 1);
+    return Number.isInteger(page) && page > 0 && page <= 500 ? page : 1;
+  });
   const queryClient = useQueryClient();
   const session = useSession();
-  const feed = useQuery({ queryKey: ['feed', session.user?.id], queryFn: getFeed, enabled: Boolean(session.user), retry: false });
+  const feed = useQuery({ queryKey: ['feed', session.user?.id, feedPage], queryFn: ({ signal }) => getFeed(feedPage, signal), enabled: Boolean(session.user), retry: false, refetchInterval: 30_000 });
+  const people = useQuery({ queryKey: ['people-search', peopleQuery, peoplePage], queryFn: () => searchPeople(peopleQuery, peoplePage), enabled: Boolean(peopleQuery), retry: false });
+
+  useEffect(() => {
+    const syncSearch = () => {
+      const params = new URLSearchParams(window.location.search);
+      const query = params.get('q') ?? '';
+      const page = Number(params.get('page') ?? 1);
+      setPeopleInput(query);
+      setPeopleQuery(/^[a-zA-Z0-9_]{2,40}$/.test(query) ? query.toLowerCase() : '');
+      setPeoplePage(Number.isInteger(page) && page > 0 && page <= 500 ? page : 1);
+      const requestedFeedPage = Number(params.get('feedPage') ?? 1);
+      setFeedPage(Number.isInteger(requestedFeedPage) && requestedFeedPage > 0 && requestedFeedPage <= 500 ? requestedFeedPage : 1);
+    };
+    window.addEventListener('popstate', syncSearch);
+    return () => window.removeEventListener('popstate', syncSearch);
+  }, []);
+
+  const submitPeopleSearch = (event: FormEvent) => {
+    event.preventDefault();
+    const query = peopleInput.trim();
+    if (!/^[a-zA-Z0-9_]{2,40}$/.test(query)) {
+      setPeopleSearchError('Digite de 2 a 40 letras, números ou _ para buscar por username.');
+      return;
+    }
+    setPeopleSearchError('');
+    setPeopleInput(query);
+    setPeopleQuery(query.toLowerCase());
+    setPeoplePage(1);
+    writeCommunitySearch(query.toLowerCase(), 1);
+  };
+
+  const changePeoplePage = (page: number) => {
+    setPeoplePage(page);
+    writeCommunitySearch(peopleQuery, page);
+  };
+
+  useEffect(() => {
+    if (feed.data && feedPage > feed.data.totalPages) {
+      const lastPage = feed.data.totalPages;
+      setFeedPage(lastPage);
+      writeCommunityFeedPage(lastPage);
+    }
+  }, [feed.data, feedPage]);
+
+  const changeFeedPage = (page: number) => {
+    setFeedPage(page);
+    writeCommunityFeedPage(page);
+  };
 
   return <div className="shell">
     <Header user={session.user} onSignIn={() => setAuthMode('login')} onSignOut={session.signOut} signingOut={session.signingOut} activePage="community" />
     <main className="community-main">
       <section className="my-list-heading"><p className="eyebrow">MOVIEMATCH SOCIAL</p><h1>Comunidade</h1><p>Veja as resenhas publicadas por você e pelas pessoas que segue.</p></section>
+      <section className="people-search" aria-labelledby="people-search-title">
+        <div><p className="eyebrow">ENCONTRE PESSOAS</p><h2 id="people-search-title">Buscar por username</h2></div>
+        <form role="search" aria-label="Buscar pessoas" onSubmit={submitPeopleSearch}>
+          <label htmlFor="people-search-input">Username</label>
+          <div className="people-search-controls"><input id="people-search-input" type="search" minLength={2} maxLength={40} pattern="[A-Za-z0-9_]+" placeholder="Ex.: erika" value={peopleInput} onChange={(event) => { setPeopleInput(event.target.value); setPeopleSearchError(''); }} /><button className="filter-submit" type="submit">Buscar pessoas</button></div>
+        </form>
+        {peopleSearchError && <p className="auth-error" role="alert">{peopleSearchError}</p>}
+        {peopleQuery && <div className="people-results" aria-live="polite">
+          {people.isLoading && <p role="status">Buscando pessoas…</p>}
+          {people.isError && <p className="state error" role="alert">{people.error.message} <button type="button" className="inline-retry" onClick={() => void people.refetch()}>Tentar novamente</button></p>}
+          {people.data && people.data.items.length === 0 && <p className="state">Nenhuma pessoa encontrada para “{peopleQuery}”.</p>}
+          {people.data && people.data.items.length > 0 && <>
+            <p className="people-result-count">{people.data.totalResults} {people.data.totalResults === 1 ? 'pessoa encontrada' : 'pessoas encontradas'}</p>
+            <div className="people-results-list">{people.data.items.map((person) => <a className="people-result" key={person.username} href={`/users/${encodeURIComponent(person.username)}`}>
+              <span className="profile-avatar" aria-hidden="true">{person.displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span>
+              <span><strong>{person.displayName}</strong><small>@{person.username}</small>{person.bio && <span className="people-result-bio">{person.bio}</span>}</span>
+            </a>)}</div>
+            {people.data.totalPages > 1 && <nav className="people-pagination" aria-label="Paginação dos resultados de pessoas">
+              <button className="account-button" type="button" disabled={people.data.page <= 1} onClick={() => changePeoplePage(people.data!.page - 1)}>Anterior</button>
+              <span>Página {people.data.page} de {people.data.totalPages}</span>
+              <button className="account-button" type="button" disabled={people.data.page >= people.data.totalPages} onClick={() => changePeoplePage(people.data!.page + 1)}>Próxima</button>
+            </nav>}
+          </>}
+        </div>}
+      </section>
       {session.isLoading && <div className="state" role="status">Verificando sua sessão…</div>}
       {!session.isLoading && !session.user && <section className="state list-auth-prompt"><h2>Entre para ver seu feed</h2><p>As resenhas publicadas por pessoas que você segue aparecem aqui.</p><button className="filter-submit" onClick={() => setAuthMode('login')}>Entrar</button></section>}
       {session.user && feed.isLoading && <div className="state" role="status">Carregando feed…</div>}
       {session.user && feed.isError && <div className="state error" role="alert"><p>{feed.error.message}</p><button className="account-button" onClick={() => void feed.refetch()}>Tentar novamente</button></div>}
-      {session.user && !feed.isLoading && !feed.isError && feed.data?.length === 0 && <div className="state">Seu feed está vazio. As resenhas de quem você segue aparecerão aqui.</div>}
-      {feed.data && feed.data.length > 0 && <div className="community-feed">{feed.data.map((review) => <article className="feed-review" key={review.id}>
+      {session.user && !feed.isLoading && !feed.isError && feed.data?.totalResults === 0 && <div className="state">Seu feed está vazio. As resenhas de quem você segue aparecerão aqui.</div>}
+      {feed.data && feed.data.items.length > 0 && <div className="community-feed">{feed.data.items.map((review) => <article className="feed-review" key={review.id}>
         <div className="feed-review-heading"><a href={`/users/${encodeURIComponent(review.author.username)}`}><UserRound size={16} /> {review.author.displayName} <span>@{review.author.username}</span></a><span>★ {review.rating.toFixed(1)} / 5</span></div>
         <h2><a href={`/movies/${review.movieId}`}>{review.title}</a></h2>
         {review.body && <p>{review.body}</p>}
         <a className="feed-movie-link" href={`/movies/${review.movieId}`}>Ver filme</a>
       </article>)}</div>}
+      {session.user && feed.data && feed.data.totalPages > 1 && <nav className="people-pagination" aria-label="Paginação do feed">
+        <button className="account-button" type="button" disabled={feed.data.page <= 1} onClick={() => changeFeedPage(feed.data!.page - 1)}>Anterior</button>
+        <span>Página {feed.data.page} de {feed.data.totalPages} · {feed.data.totalResults} resenhas</span>
+        <button className="account-button" type="button" disabled={feed.data.page >= feed.data.totalPages} onClick={() => changeFeedPage(feed.data!.page + 1)}>Próxima</button>
+      </nav>}
     </main>
     <footer><span className="brand"><span>Movie</span>Match</span><p>Descubra. Compartilhe. Dê match.</p></footer>
     {authMode && <AuthDialog mode={authMode} onModeChange={setAuthMode} onClose={() => setAuthMode(null)} onAuthenticated={async () => { setAuthMode(null); await queryClient.invalidateQueries({ queryKey: ['session'] }); }} />}
@@ -584,23 +713,44 @@ function PublicProfilePage({ username }: { username: string }) {
   const profile = useQuery({ queryKey: ['public-profile', username], queryFn: () => getPublicProfile(username) });
   const publicList = useQuery({ queryKey: ['profile-public-list', username], queryFn: () => getPublicList(username), enabled: Boolean(profile.data) });
   const ownsProfile = Boolean(session.user && profile.data && session.user.username === profile.data.username);
+  const followKey = ['follow-status', session.user?.id, username];
+  const followStatus = useQuery({ queryKey: followKey, queryFn: () => getFollowStatus(username), enabled: Boolean(session.user && profile.data && !ownsProfile), retry: false });
+  const updateFollow = useMutation({
+    mutationFn: (following: boolean) => setFollowing(username, following),
+    onSuccess: async (_result, following) => {
+      queryClient.setQueryData(followKey, { following });
+      await queryClient.invalidateQueries({ queryKey: ['public-profile', username] });
+      await queryClient.invalidateQueries({ queryKey: ['feed', session.user?.id] });
+    },
+  });
   const handleProfileSaved = (updated: PublicProfile) => {
     queryClient.setQueryData<SessionUser>(['session'], (current) => current ? { ...current, ...updated } : current);
-    queryClient.setQueryData(['public-profile', updated.username], updated);
+    queryClient.setQueryData(['public-profile', updated.username], {
+      ...updated,
+      followersCount: profile.data?.followersCount,
+      followingCount: profile.data?.followingCount,
+    });
     setEditing(false);
     navigateTo(`/users/${encodeURIComponent(updated.username)}`);
   };
 
   return <div className="shell">
-    <Header user={session.user} onSignIn={() => navigateTo('/login')} onSignOut={session.signOut} signingOut={session.signingOut} activePage="profile" />
+    <Header user={session.user} onSignIn={() => navigateTo(loginPathForCurrentPage())} onSignOut={session.signOut} signingOut={session.signingOut} activePage="profile" />
     <main className="profile-main">
       <a className="back-link" href="/community"><ArrowLeft size={18} /> Voltar para comunidade</a>
       {profile.isLoading && <div className="state" role="status">Carregando perfil…</div>}
       {profile.isError && <div className="state error" role="alert">{profile.error.message}</div>}
-      {profile.data && <section className="profile-card">
+        {profile.data && <section className="profile-card">
         <span className="profile-avatar" aria-hidden="true">{profile.data.displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span>
         <p className="eyebrow">PERFIL PÚBLICO</p><h1>{profile.data.displayName}</h1><p className="profile-username">@{profile.data.username}</p>
+        <p className="profile-follow-counts"><span>{profile.data.followersCount ?? 0} seguidores</span><span>{profile.data.followingCount ?? 0} seguindo</span></p>
         {profile.data.bio && <p className="profile-bio">{profile.data.bio}</p>}
+        {!ownsProfile && session.user && <div className="profile-follow-actions">
+          {followStatus.isLoading ? <span role="status">Verificando relação…</span> : <button className="account-button" type="button" disabled={followStatus.isError || updateFollow.isPending} onClick={() => updateFollow.mutate(!followStatus.data?.following)}>{updateFollow.isPending ? 'Salvando…' : followStatus.data?.following ? 'Deixar de seguir' : 'Seguir'}</button>}
+          {followStatus.isError && <p className="auth-error" role="alert">{followStatus.error.message} <button type="button" className="inline-retry" onClick={() => void followStatus.refetch()}>Tentar novamente</button></p>}
+          {updateFollow.isError && <p className="auth-error" role="alert">{updateFollow.error.message}</p>}
+        </div>}
+        {!ownsProfile && !session.user && !session.isLoading && !session.isError && <button className="account-button" type="button" onClick={() => navigateTo(loginPathForCurrentPage())}>Entre para seguir</button>}
         {ownsProfile && !editing && <button className="account-button profile-edit-trigger" type="button" onClick={() => setEditing(true)}>Editar perfil</button>}
         {ownsProfile && editing && <ProfileEditor profile={profile.data} onSaved={handleProfileSaved} onCancel={() => setEditing(false)} />}
         {publicList.isSuccess && <a className="filter-submit" href={`/users/${encodeURIComponent(username)}/list`}>Ver lista pública ({publicList.data.length})</a>}
@@ -629,12 +779,14 @@ function ChatPage() {
 
 function LoginPage() {
   const [mode, setMode] = useState<AuthMode>('login');
-  const [completed, setCompleted] = useState(false);
+  const [returnTo] = useState(() => safeReturnPath(new URLSearchParams(window.location.search).get('returnTo')));
   const queryClient = useQueryClient();
   return <div className="shell login-page">
     <Header user={null} onSignIn={() => setMode('login')} onSignOut={() => undefined} signingOut={false} />
     <main className="login-main">
-      {completed ? <section className="state list-auth-prompt"><h1>Sessão iniciada</h1><p>Você já pode continuar para sua lista.</p><a className="filter-submit" href="/my-list">Abrir minha lista</a></section> : <><a className="back-link" href="/"><ArrowLeft size={18} /> Voltar para descoberta</a><section className="login-intro"><p className="eyebrow">MOVIEMATCH</p><h1>Entre para continuar</h1><p>Acesse sua lista e participe da comunidade.</p></section><AuthDialog mode={mode} onModeChange={setMode} onClose={() => navigateTo('/')} onAuthenticated={async () => { setCompleted(true); await queryClient.invalidateQueries({ queryKey: ['session'] }); }} /></>}
+      <a className="back-link" href="/"><ArrowLeft size={18} /> Voltar para descoberta</a>
+      <section className="login-intro"><p className="eyebrow">MOVIEMATCH</p><h1>{mode === 'login' ? 'Entre para continuar' : mode === 'register' ? 'Crie sua conta' : 'Recupere seu acesso'}</h1><p>{mode === 'request-reset' ? 'Informe seu e-mail e enviaremos instruções se houver uma conta associada.' : 'Acesse sua lista e participe da comunidade.'}</p></section>
+      <AuthDialog mode={mode} onModeChange={setMode} onClose={() => navigateTo('/')} onAuthenticated={async () => { await queryClient.invalidateQueries({ queryKey: ['session'] }); navigateTo(returnTo, true); }} />
     </main>
     <footer><span className="brand"><span>Movie</span>Match</span><p>Descubra. Compartilhe. Dê match.</p></footer>
   </div>;

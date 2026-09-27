@@ -85,13 +85,15 @@ Esse comando valida os tipos, executa os testes e gera os builds de produção d
 | `POST` | `/api/auth/password-reset` | Solicitar recuperação sem revelar se o e-mail existe |
 | `POST` | `/api/auth/password-reset/confirm` | Redefinir senha com token de uso único |
 | `GET` | `/api/users/:username` | Perfil público (username, nome, bio e data de criação; sem ID, e-mail ou sessão) |
+| `GET` | `/api/users/search?q=&page=` | Busca paginada de perfis por username (20 por página; sem ID ou e-mail) |
 | `PUT` | `/api/users/me` | Editar nome, username e bio da conta autenticada |
+| `GET/PUT/DELETE` | `/api/users/by-username/:username/follow` | Consultar, seguir ou deixar de seguir perfil (sessão obrigatória) |
 | `GET` | `/api/users/:username/list` | Lista pública (retorna 404 se privada) |
 | `GET` | `/api/users/:username/common` | Filmes em comum com uma lista pública (requer sessão) |
 | `GET/PUT` | `/api/me/list-visibility` | Consultar ou alterar visibilidade da própria lista |
 | `GET` | `/api/movies/:movieId/reviews` | Resenhas de um filme |
 | `PUT` | `/api/movies/:movieId/reviews/me` | Publicar a própria resenha |
-| `GET` | `/api/feed` | Feed do usuário atual |
+| `GET` | `/api/feed?page=1` | Feed paginado de resenhas próprias e de perfis seguidos com lista pública |
 | `PUT/DELETE` | `/api/users/:userId/follow` | Seguir ou deixar de seguir |
 
 O `PUT` recebe `{ "title": "...", "posterPath": null, "status": "want_to_watch", "isFavorite": false }`; os status válidos são `want_to_watch`, `watching`, `watched` e `abandoned`. `isFavorite` é opcional e, quando omitido numa atualização, o valor salvo é preservado. A combinação única por conta e filme transforma inclusões repetidas em atualização, sem criar duplicatas.
@@ -100,11 +102,11 @@ A conta local de demonstração permanece como dado inicial sem senha: não pode
 
 A recuperação cria token aleatório de uso único, guarda apenas o hash e expira em 30 minutos. A aplicação contém a interface `PasswordResetMailer`, mas o envio não está configurado por padrão. Para produção, escolha e configure um serviço transacional de e-mail (SMTP ou API), implemente o adaptador e remetente verificado; nunca registre senha, token ou URL de recuperação nos logs. A migration `007_password_reset_tokens.sql` precisa ser aplicada antes de habilitar o fluxo.
 
-Listas são privadas por padrão. Tornar uma lista pública publica seus filmes, status e favoritos; notas e textos pessoais da lista não são expostos. Uma resenha publicada é pública na página do filme e pode aparecer no feed de quem segue a pessoa, mesmo que a lista permaneça privada.
+Listas são privadas por padrão. Tornar uma lista pública publica seus filmes, status e favoritos; notas e textos pessoais da lista não são expostos. Uma resenha publicada é pública na página do filme. No feed, seguidores veem as resenhas apenas enquanto a lista do autor estiver pública; o próprio autor continua vendo as suas.
 
 ## Roadmap
 
-O [planejamento do MVP e checklist de execução para Luna](docs/PLANO_MVP_LUNA.md) detalha as tarefas, dependências e critérios de aceite para buscador, login, perfil, minha lista, comunidade, compartilhamento e chat.
+O roadmap abaixo resume a evolução planejada do produto.
 
 - **v1.0 — fundação:** monorepo, TypeScript, Vite, API modular, PostgreSQL, Docker e CI.
 - **v1.1 — identidade:** cadastro, login, sessões seguras e perfil.
@@ -122,3 +124,9 @@ O [planejamento do MVP e checklist de execução para Luna](docs/PLANO_MVP_LUNA.
 - IA e `pgvector` entram apenas depois de existirem dados e métricas que justifiquem recomendação personalizada.
 
 Este produto usa a API da TMDB, mas não é endossado ou certificado pela TMDB.
+
+## Licença
+
+Este projeto é disponibilizado sob a [licença MIT](LICENSE). Você pode usar, copiar, modificar, distribuir, sublicenciar e vender cópias do software, preservando os avisos de copyright e o texto da licença. O software é fornecido sem garantia.
+
+A licença deste repositório não se estende a marcas, dados, serviços, dependências ou outros materiais de terceiros, que permanecem sujeitos aos próprios termos.

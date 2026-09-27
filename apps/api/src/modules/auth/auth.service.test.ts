@@ -8,6 +8,7 @@ function makeAuth() {
   const users: UsersRepository = {
     findById: vi.fn(async () => account),
     findByUsername: vi.fn(async () => account),
+    searchByUsername: vi.fn(async () => ({ items: account ? [account] : [], totalResults: account ? 1 : 0 })),
     findAccountByEmail: vi.fn(async () => account),
     updateProfile: vi.fn(async () => account),
     createAccount: vi.fn(async (input) => {

@@ -4,4 +4,6 @@ export type PublicUser = {
   displayName: string;
   bio: string | null;
   createdAt: Date;
+  followersCount?: number;
+  followingCount?: number;
 };

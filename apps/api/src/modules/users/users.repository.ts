@@ -6,6 +6,7 @@ export type AccountUser = PublicUser & { email: string; passwordHash: string | n
 export interface UsersRepository {
   findById(id: string): Promise<PublicUser | null>;
   findByUsername(username: string): Promise<PublicUser | null>;
+  searchByUsername(query: string, page: number, pageSize: number): Promise<{ items: PublicUser[]; totalResults: number }>;
   findAccountByEmail(email: string): Promise<AccountUser | null>;
   createAccount(input: { email: string; username: string; displayName: string; passwordHash: string }): Promise<PublicUser>;
   updateProfile(id: string, input: { username: string; displayName: string; bio: string | null }): Promise<PublicUser | null>;
@@ -20,6 +21,23 @@ export class PgUsersRepository implements UsersRepository {
 
   async findByUsername(username: string) {
     return this.findOne('username', username);
+  }
+
+  async searchByUsername(query: string, page: number, pageSize: number) {
+    const [users, count] = await Promise.all([
+      this.db.query<PublicUser>(
+        `SELECT id, username, display_name AS "displayName", bio, created_at AS "createdAt"
+         FROM users WHERE password_hash IS NOT NULL AND position(lower($1) in lower(username)) > 0
+         ORDER BY username LIMIT $2 OFFSET $3`,
+        [query, pageSize, (page - 1) * pageSize],
+      ),
+      this.db.query<{ totalResults: number }>(
+        `SELECT count(*)::int AS "totalResults"
+         FROM users WHERE password_hash IS NOT NULL AND position(lower($1) in lower(username)) > 0`,
+        [query],
+      ),
+    ]);
+    return { items: users.rows, totalResults: count.rows[0]?.totalResults ?? 0 };
   }
 
   async findAccountByEmail(email: string): Promise<AccountUser | null> {
@@ -56,6 +74,7 @@ export class PgUsersRepository implements UsersRepository {
   private async findOne(field: 'id' | 'username', value: string): Promise<PublicUser | null> {
     const result = await this.db.query(
       `SELECT id, username, display_name AS "displayName", bio, created_at AS "createdAt"
+              ${field === 'username' ? ', (SELECT count(*)::int FROM follows f WHERE f.followed_id = users.id) AS "followersCount", (SELECT count(*)::int FROM follows f WHERE f.follower_id = users.id) AS "followingCount"' : ''}
        FROM users WHERE ${field} = $1 AND password_hash IS NOT NULL`,
       [value],
     );

@@ -12,6 +12,7 @@ const owner = { id: 'owner-1', username: 'alice', displayName: 'Alice', bio: nul
 function makeApp() {
   const users = {
     getProfile: vi.fn(async () => ({ ...owner, email: 'private@example.com', passwordHash: 'never-public' })),
+    searchProfiles: vi.fn(async (_query: string, page: number) => ({ items: [owner], page, totalPages: 3, totalResults: 45 })),
     updateProfile: vi.fn(async (_userId: string, input: { username: string; displayName: string; bio: string | null }) => ({ ...owner, ...input })),
   } as unknown as UsersService;
   const auth = { resolveSession: vi.fn(async (token: string) => token === 'valid-session' ? owner.id : null) } as unknown as AuthService;
@@ -25,6 +26,18 @@ function makeApp() {
 }
 
 describe('users routes', () => {
+  it('returns paginated public search results without internal ids', async () => {
+    const { app, users } = makeApp();
+    const response = await request(app).get('/api/users/search?q=%20ALI%20&page=2');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      data: [{ username: 'alice', displayName: 'Alice', bio: null, createdAt: '2026-01-01T00:00:00.000Z' }],
+      pagination: { page: 2, totalPages: 3, totalResults: 45 },
+    });
+    expect(users.searchProfiles).toHaveBeenCalledWith('ali', 2);
+  });
+
   it('returns only public profile fields', async () => {
     const { app } = makeApp();
     const response = await request(app).get('/api/users/alice');
@@ -34,6 +47,20 @@ describe('users routes', () => {
     expect(response.body.data).not.toHaveProperty('email');
     expect(response.body.data).not.toHaveProperty('passwordHash');
     expect(response.body.data).not.toHaveProperty('session');
+  });
+
+  it('normalizes direct profile links and returns real social counts', async () => {
+    const { app, users } = makeApp();
+    vi.mocked(users.getProfile).mockResolvedValueOnce({
+      ...owner,
+      followersCount: 12,
+      followingCount: 7,
+    });
+
+    const response = await request(app).get('/api/users/ALICE');
+    expect(response.status).toBe(200);
+    expect(users.getProfile).toHaveBeenCalledWith('alice');
+    expect(response.body.data).toMatchObject({ followersCount: 12, followingCount: 7 });
   });
 
   it('requires the current session and updates only its own profile', async () => {

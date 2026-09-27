@@ -53,6 +53,7 @@ describe('PgAuthRepository sessions', () => {
     await expect(repository.findSessionUser('session-hash')).resolves.toBe('user-1');
     const [sql, values] = vi.mocked(db.query).mock.calls[0]!;
     expect(String(sql)).toContain('JOIN users u ON u.id = s.user_id');
+    expect(String(sql)).toContain('s.expires_at > now()');
     expect(String(sql)).toContain('u.password_hash IS NOT NULL');
     expect(values).toEqual(['session-hash']);
   });

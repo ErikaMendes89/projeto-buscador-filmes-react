@@ -24,7 +24,7 @@ function makeApp() {
     saveInteraction: vi.fn(async (userId, input) => ({ ...input, isFavorite: input.isFavorite ?? false, userId })),
     removeInteraction: vi.fn(async () => undefined),
   } as unknown as MoviesService;
-  const auth = { resolveSession: vi.fn(async () => 'user-1') } as unknown as AuthService;
+  const auth = { resolveSession: vi.fn(async (token: string) => token === 'bob-session' ? 'user-2' : token === 'opaque' ? 'user-1' : null) } as unknown as AuthService;
   const app = express();
   app.use(express.json());
   app.use('/api', createMoviesRouter(service, auth));
@@ -88,6 +88,19 @@ describe('movie routes', () => {
     const removed = await request(app).delete('/api/me/interactions/10').set('Cookie', 'moviematch_session=opaque');
     expect(removed.status).toBe(204);
     expect(service.removeInteraction).toHaveBeenCalledWith('user-1', 10);
+  });
+
+  it('keeps personal movie lists separate between two authenticated accounts', async () => {
+    const { app, service } = makeApp();
+    const alice = await request(app).get('/api/me/interactions').set('Cookie', 'moviematch_session=opaque');
+    const bob = await request(app).get('/api/me/interactions').set('Cookie', 'moviematch_session=bob-session');
+
+    expect(alice.status).toBe(200);
+    expect(bob.status).toBe(200);
+    expect(alice.body.data[0].userId).toBe('user-1');
+    expect(bob.body.data[0].userId).toBe('user-2');
+    expect(service.listInteractions).toHaveBeenNthCalledWith(1, 'user-1');
+    expect(service.listInteractions).toHaveBeenNthCalledWith(2, 'user-2');
   });
 
   it('keeps lists private by default and only publishes links when explicitly enabled', async () => {
