@@ -5,7 +5,7 @@ import type { AuthService } from './auth.service.js';
 
 export const SESSION_COOKIE = 'moviematch_session';
 
-export function readSessionToken(request: Request): string | null {
+export function readSessionToken(request: Pick<Request, 'headers'>): string | null {
   const cookieHeader = request.headers.cookie;
   if (!cookieHeader) return null;
   const entry = cookieHeader.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${SESSION_COOKIE}=`));

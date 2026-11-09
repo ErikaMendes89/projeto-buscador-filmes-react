@@ -617,3 +617,96 @@ describe('MovieMatch home', () => {
     expect(screen.queryByText('1 filme em comum.')).not.toBeInTheDocument();
   });
 });
+
+describe('chat interface', () => {
+  beforeEach(() => {
+    cleanup();
+    window.history.replaceState(null, '', '/chat');
+    localStorage.clear();
+  });
+
+  it('shows unread messages and keeps a failed message for a retry with the same id', async () => {
+    const conversation = { id: 'conversation-1', kind: 'individual', participant: { username: 'bob', displayName: 'Bob' }, lastMessage: { id: 'message-old', body: 'Olá Alice', senderUsername: 'bob', createdAt: new Date().toISOString() }, lastMessageId: 'message-old', unreadCount: 1, updatedAt: new Date().toISOString() };
+    const sent: { type: string; conversationId: string; clientMessageId: string; body: string }[] = [];
+    let attempt = 0;
+    class MockWebSocket {
+      static OPEN = 1;
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      constructor(public url: string) { queueMicrotask(() => { this.readyState = 1; this.onopen?.(); }); }
+      send(value: string) {
+        const payload = JSON.parse(value) as typeof sent[number];
+        sent.push(payload);
+        attempt += 1;
+        if (attempt === 1) this.onmessage?.({ data: JSON.stringify({ type: 'error', code: 'mutual_follow_required' }) });
+        else this.onmessage?.({ data: JSON.stringify({ type: 'message', data: { id: 'message-new', conversationId: payload.conversationId, clientMessageId: payload.clientMessageId, body: payload.body, sender: { username: 'alice', displayName: 'Alice' }, createdAt: new Date().toISOString() } }) });
+      }
+      close() { this.readyState = 3; }
+    }
+    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/auth/session')) return { ok: true, status: 200, json: async () => ({ data: { user: signedInUser } }) } as Response;
+      if (url.endsWith('/api/conversations')) return { ok: true, status: 200, json: async () => ({ data: [conversation] }) } as Response;
+      if (url.includes('/messages/after/')) return { ok: true, status: 200, json: async () => ({ data: [{ id: 'message-missed', conversationId: conversation.id, clientMessageId: 'missed-client', body: 'Mensagem recebida durante a queda', sender: { username: 'bob', displayName: 'Bob' }, createdAt: new Date(Date.now() + 1000).toISOString() }], pagination: { hasMore: false, nextCursor: null } }) } as Response;
+      if (url.includes('/messages')) return { ok: true, status: 200, json: async () => ({ data: [{ id: 'message-old', conversationId: conversation.id, clientMessageId: 'old-client', body: 'Olá Alice', sender: { username: 'bob', displayName: 'Bob' }, createdAt: conversation.lastMessage.createdAt }], pagination: { page: 1, pageSize: 20, totalPages: 1, totalResults: 1 } }) } as Response;
+      return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+    }));
+    renderApp();
+
+    expect(await screen.findByText('1 não lidas')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Bob Olá Alice/ }));
+    const input = await screen.findByLabelText('Mensagem');
+    fireEvent.change(input, { target: { value: 'Vamos falar de cinema' } });
+    fireEvent.click(screen.getByRole('button', { name: /Enviar/ }));
+
+    expect(await screen.findByText('Falhou ao enviar')).toBeInTheDocument();
+    expect(screen.getByLabelText('Mensagem')).toHaveValue('Vamos falar de cinema');
+    fireEvent.click(screen.getByRole('button', { name: /Tentar novamente/ }));
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1]).toEqual(sent[0]);
+    expect(await screen.findByText('Vamos falar de cinema')).toBeInTheDocument();
+    expect(screen.queryByText('Falhou ao enviar')).not.toBeInTheDocument();
+    fireEvent(window, new Event('focus'));
+    expect(await screen.findByText('Mensagem recebida durante a queda')).toBeInTheDocument();
+  });
+
+  it('sends a catalog-validated movie reference and renders its details link', async () => {
+    const conversation = { id: 'conversation-1', kind: 'individual', participant: { username: 'bob', displayName: 'Bob' }, lastMessage: null, lastMessageId: null, unreadCount: 0, updatedAt: new Date().toISOString() };
+    let sent: Record<string, unknown> | null = null;
+    class MockWebSocket {
+      static OPEN = 1;
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      constructor() { queueMicrotask(() => { this.readyState = 1; this.onopen?.(); }); }
+      send(value: string) {
+        sent = JSON.parse(value) as Record<string, unknown>;
+        this.onmessage?.({ data: JSON.stringify({ type: 'message', data: { id: 'movie-message', conversationId: conversation.id, clientMessageId: sent.clientMessageId, body: 'Filme compartilhado: Filme validado', movie: { id: 10, title: 'Filme validado', posterPath: '/poster.jpg' }, sender: { username: 'alice', displayName: 'Alice' }, createdAt: new Date().toISOString() } }) });
+      }
+      close() { this.readyState = 3; }
+    }
+    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/auth/session')) return { ok: true, status: 200, json: async () => ({ data: { user: signedInUser } }) } as Response;
+      if (url.endsWith('/api/conversations')) return { ok: true, status: 200, json: async () => ({ data: [conversation] }) } as Response;
+      if (url.includes('/api/movies/10')) return { ok: true, status: 200, json: async () => ({ data: { id: 10, title: 'Filme validado', overview: '', posterPath: '/poster.jpg', releaseDate: null, rating: 7, genreIds: [], genres: [] }, meta: { catalogMode: 'demo' } }) } as Response;
+      if (url.includes('/messages/after/')) return { ok: true, status: 200, json: async () => ({ data: [], pagination: { hasMore: false, nextCursor: null } }) } as Response;
+      if (url.includes('/messages')) return { ok: true, status: 200, json: async () => ({ data: [], pagination: { page: 1, pageSize: 20, totalPages: 1, totalResults: 0 } }) } as Response;
+      return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+    }));
+    window.history.replaceState(null, '', '/chat?movie=10');
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Bob/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Enviar filme' }));
+
+    await waitFor(() => expect(sent).toMatchObject({ type: 'send_message', movieId: 10 }));
+    expect(sent).not.toHaveProperty('body');
+    expect(await screen.findByRole('link', { name: /Filme validado.*Ver detalhes do filme/ })).toHaveAttribute('href', '/movies/10');
+  });
+});

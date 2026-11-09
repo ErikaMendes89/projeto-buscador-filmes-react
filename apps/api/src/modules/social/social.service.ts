@@ -17,7 +17,9 @@ export class SocialService {
 
   follow(userId: string, targetUserId: string) {
     if (userId === targetUserId) throw new AppError('Você não pode seguir o próprio perfil', 400, 'self_follow');
-    return this.social.follow(userId, targetUserId);
+    return this.social.follow(userId, targetUserId).then((allowed) => {
+      if (!allowed) throw new AppError('Não é possível seguir este perfil enquanto houver um bloqueio', 403, 'user_blocked');
+    });
   }
 
   unfollow(userId: string, targetUserId: string) {
@@ -27,6 +29,32 @@ export class SocialService {
   async getFollowStatus(userId: string, username: string) {
     const followedId = await this.findTargetUserId(username);
     return { following: userId !== followedId && await this.social.isFollowing(userId, followedId) };
+  }
+
+  async getBlockStatus(userId: string, username: string) {
+    const targetId = await this.findTargetUserId(username);
+    if (userId === targetId) return { blockedByMe: false, blockedYou: false };
+    return this.social.getBlockStatus(userId, targetId);
+  }
+
+  async blockByUsername(userId: string, username: string) {
+    const targetId = await this.findTargetUserId(username);
+    if (userId === targetId) throw new AppError('Você não pode bloquear o próprio perfil', 400, 'self_block');
+    return this.social.block(userId, targetId);
+  }
+
+  async unblockByUsername(userId: string, username: string) {
+    const targetId = await this.findTargetUserId(username);
+    if (userId === targetId) throw new AppError('Você não pode desbloquear o próprio perfil', 400, 'self_block');
+    return this.social.unblock(userId, targetId);
+  }
+
+  async assertChatAllowed(userId: string, username: string) {
+    const targetId = await this.findTargetUserId(username);
+    if (userId === targetId) throw new AppError('Não é possível iniciar uma conversa consigo mesmo', 400, 'self_chat');
+    if (!await this.social.canChat(userId, targetId)) {
+      throw new AppError('Não é possível conversar com este perfil enquanto houver um bloqueio', 403, 'user_blocked');
+    }
   }
 
   async followByUsername(userId: string, username: string) {

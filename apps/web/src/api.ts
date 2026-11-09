@@ -30,8 +30,53 @@ export type Review = { id: string; movieId: number; title: string; rating: numbe
 export type ListVisibility = { isPublic: boolean };
 export type FeedReview = Review & { posterPath: string | null };
 export type FeedPage = { items: FeedReview[]; page: number; totalPages: number; totalResults: number };
+export type ConversationMessage = { id: string; conversationId: string; clientMessageId: string; body: string; movie: { id: number; title: string; posterPath: string | null } | null; sender: { username: string; displayName: string }; createdAt: string };
+export type ConversationSummary = { id: string; kind: 'individual'; participant: { username: string; displayName: string }; lastMessage: { id: string; body: string; senderUsername: string; createdAt: string } | null; lastMessageId: string | null; unreadCount: number; updatedAt: string };
+export type ConversationHistory = { items: ConversationMessage[]; page: number; pageSize: number; totalPages: number; totalResults: number };
+export type ConversationRecovery = { items: ConversationMessage[]; hasMore: boolean; nextCursor: string | null };
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3333';
+
+export function conversationRealtimeUrl(): string {
+  const url = new URL('/api/conversations/realtime', API_URL);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.href;
+}
+
+export async function getConversations(): Promise<ConversationSummary[]> {
+  const response = await fetch(`${API_URL}/api/conversations`, { credentials: 'include' });
+  if (!response.ok) throw await errorFromResponse(response, 'Não foi possível carregar suas conversas.');
+  const payload = (await response.json()) as { data: ConversationSummary[] };
+  return payload.data;
+}
+
+export async function createConversation(username: string): Promise<{ id: string; kind: 'individual' }> {
+  const response = await fetch(`${API_URL}/api/conversations`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) });
+  if (!response.ok) throw await errorFromResponse(response, 'Não foi possível iniciar a conversa.');
+  const payload = (await response.json()) as { data: { id: string; kind: 'individual' } };
+  return payload.data;
+}
+
+export async function getConversationHistory(conversationId: string, page = 1): Promise<ConversationHistory> {
+  const url = new URL(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, API_URL);
+  url.searchParams.set('page', String(page));
+  const response = await fetch(url, { credentials: 'include' });
+  if (!response.ok) throw await errorFromResponse(response, 'Não foi possível carregar as mensagens.');
+  const payload = (await response.json()) as { data: ConversationMessage[]; pagination: Omit<ConversationHistory, 'items'> };
+  return { items: payload.data, ...payload.pagination };
+}
+
+export async function getMessagesAfter(conversationId: string, afterMessageId: string): Promise<ConversationRecovery> {
+  const response = await fetch(`${API_URL}/api/conversations/${encodeURIComponent(conversationId)}/messages/after/${encodeURIComponent(afterMessageId)}`, { credentials: 'include' });
+  if (!response.ok) throw await errorFromResponse(response, 'Não foi possível recuperar as mensagens recentes.');
+  const payload = (await response.json()) as { data: ConversationMessage[]; pagination: Omit<ConversationRecovery, 'items'> };
+  return { items: payload.data, ...payload.pagination };
+}
+
+export async function markConversationRead(conversationId: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/conversations/${encodeURIComponent(conversationId)}/messages/read`, { method: 'POST', credentials: 'include' });
+  if (!response.ok) throw await errorFromResponse(response, 'Não foi possível atualizar a leitura da conversa.');
+}
 
 export async function getSession(): Promise<SessionUser | null> {
   const response = await fetch(`${API_URL}/api/auth/session`, { credentials: 'include' });
@@ -235,6 +280,26 @@ export async function setFollowing(username: string, following: boolean): Promis
     credentials: 'include',
   });
   if (!response.ok) throw await errorFromResponse(response, following ? 'Não foi possível seguir este perfil.' : 'Não foi possível deixar de seguir este perfil.');
+}
+
+export async function getBlockStatus(username: string): Promise<{ blockedByMe: boolean; blockedYou: boolean }> {
+  const response = await fetch(`${API_URL}/api/users/by-username/${encodeURIComponent(username)}/block`, { credentials: 'include' });
+  if (!response.ok) throw await errorFromResponse(response, 'Não foi possível consultar o bloqueio deste perfil.');
+  const payload = (await response.json()) as { data: { blockedByMe: boolean; blockedYou: boolean } };
+  return payload.data;
+}
+
+export async function setBlocked(username: string, blocked: boolean): Promise<void> {
+  const response = await fetch(`${API_URL}/api/users/by-username/${encodeURIComponent(username)}/block`, {
+    method: blocked ? 'PUT' : 'DELETE',
+    credentials: 'include',
+  });
+  if (!response.ok) throw await errorFromResponse(response, blocked ? 'Não foi possível bloquear este perfil.' : 'Não foi possível desbloquear este perfil.');
+}
+
+export async function checkChatAccess(username: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/users/by-username/${encodeURIComponent(username)}/chat-access`, { credentials: 'include' });
+  if (!response.ok) throw await errorFromResponse(response, 'Não é possível iniciar uma conversa com este perfil.');
 }
 
 export async function updateMyProfile(input: { username: string; displayName: string; bio: string | null }): Promise<PublicProfile> {

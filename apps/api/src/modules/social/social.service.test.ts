@@ -21,4 +21,25 @@ describe('SocialService', () => {
     await expect(service.followByUsername('viewer-id', 'viewer')).rejects.toMatchObject({ code: 'self_follow', statusCode: 400 });
     expect(social.follow).not.toHaveBeenCalled();
   });
+
+  it('requires a fresh follow after unblock and enforces block checks for follow and chat', async () => {
+    const social = {
+      findUserIdByUsername: vi.fn(async () => 'target-id'),
+      getBlockStatus: vi.fn(async () => ({ blockedByMe: true, blockedYou: false })),
+      follow: vi.fn(async () => false),
+      block: vi.fn(async () => undefined),
+      unblock: vi.fn(async () => undefined),
+      canChat: vi.fn(async () => false),
+    };
+    const service = new SocialService(social as never);
+
+    await expect(service.getBlockStatus('viewer-id', 'alice')).resolves.toEqual({ blockedByMe: true, blockedYou: false });
+    await expect(service.followByUsername('viewer-id', 'alice')).rejects.toMatchObject({ code: 'user_blocked', statusCode: 403 });
+    await expect(service.assertChatAllowed('viewer-id', 'alice')).rejects.toMatchObject({ code: 'user_blocked', statusCode: 403 });
+    await service.blockByUsername('viewer-id', 'alice');
+    await service.unblockByUsername('viewer-id', 'alice');
+    expect(social.block).toHaveBeenCalledWith('viewer-id', 'target-id');
+    expect(social.unblock).toHaveBeenCalledWith('viewer-id', 'target-id');
+    expect(social.follow).toHaveBeenCalledWith('viewer-id', 'target-id');
+  });
 });

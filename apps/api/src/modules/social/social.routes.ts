@@ -14,6 +14,29 @@ export function createSocialRouter(service: SocialService, auth: AuthService) {
     response.json({ data: await service.getFollowStatus(response.locals.userId as string, username) });
   }));
 
+  router.get('/users/by-username/:username/block', asyncHandler(async (request, response) => {
+    const username = z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9_]+$/).transform((value) => value.toLowerCase()).parse(request.params.username);
+    response.json({ data: await service.getBlockStatus(response.locals.userId as string, username) });
+  }));
+
+  router.put('/users/by-username/:username/block', asyncHandler(async (request, response) => {
+    const username = z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9_]+$/).transform((value) => value.toLowerCase()).parse(request.params.username);
+    await service.blockByUsername(response.locals.userId as string, username);
+    response.status(204).send();
+  }));
+
+  router.delete('/users/by-username/:username/block', asyncHandler(async (request, response) => {
+    const username = z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9_]+$/).transform((value) => value.toLowerCase()).parse(request.params.username);
+    await service.unblockByUsername(response.locals.userId as string, username);
+    response.status(204).send();
+  }));
+
+  router.get('/users/by-username/:username/chat-access', asyncHandler(async (request, response) => {
+    const username = z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9_]+$/).transform((value) => value.toLowerCase()).parse(request.params.username);
+    await service.assertChatAllowed(response.locals.userId as string, username);
+    response.json({ data: { allowed: true } });
+  }));
+
   router.put('/users/by-username/:username/follow', asyncHandler(async (request, response) => {
     const username = z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9_]+$/).transform((value) => value.toLowerCase()).parse(request.params.username);
     await service.followByUsername(response.locals.userId as string, username);

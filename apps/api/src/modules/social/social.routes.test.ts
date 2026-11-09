@@ -11,8 +11,12 @@ function makeApp() {
   const service = {
     getFeed: vi.fn(async (_userId: string, page: number) => ({ items: [], page, totalPages: 1, totalResults: 0 })),
     getFollowStatus: vi.fn(async () => ({ following: false })),
+    getBlockStatus: vi.fn(async () => ({ blockedByMe: false, blockedYou: false })),
     followByUsername: vi.fn(async () => undefined),
     unfollowByUsername: vi.fn(async () => undefined),
+    blockByUsername: vi.fn(async () => undefined),
+    unblockByUsername: vi.fn(async () => undefined),
+    assertChatAllowed: vi.fn(async () => undefined),
     follow: vi.fn(async () => undefined),
     unfollow: vi.fn(async () => undefined),
   } as unknown as SocialService;
@@ -53,5 +57,21 @@ describe('social routes authentication', () => {
     expect((await request(app).put(`/api/users/${targetUserId}/follow`).set('Cookie', cookie)).status).toBe(204);
     expect(service.getFeed).toHaveBeenCalledWith('authenticated-user', 2);
     expect(service.follow).toHaveBeenCalledWith('authenticated-user', targetUserId);
+  });
+
+  it('requires a session to inspect blocks, block or unblock accounts, and check chat access', async () => {
+    const { app, service } = makeApp();
+    const path = '/api/users/by-username/Alice/block';
+    expect((await request(app).get(path)).status).toBe(401);
+    const cookie = `${SESSION_COOKIE}=valid-session`;
+
+    expect((await request(app).get(path).set('Cookie', cookie)).body).toEqual({ data: { blockedByMe: false, blockedYou: false } });
+    expect((await request(app).put(path).set('Cookie', cookie)).status).toBe(204);
+    expect((await request(app).delete(path).set('Cookie', cookie)).status).toBe(204);
+    expect((await request(app).get('/api/users/by-username/alice/chat-access').set('Cookie', cookie)).body).toEqual({ data: { allowed: true } });
+    expect(service.getBlockStatus).toHaveBeenCalledWith('authenticated-user', 'alice');
+    expect(service.blockByUsername).toHaveBeenCalledWith('authenticated-user', 'alice');
+    expect(service.unblockByUsername).toHaveBeenCalledWith('authenticated-user', 'alice');
+    expect(service.assertChatAllowed).toHaveBeenCalledWith('authenticated-user', 'alice');
   });
 });

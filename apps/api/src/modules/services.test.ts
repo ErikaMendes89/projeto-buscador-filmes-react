@@ -72,8 +72,12 @@ describe('module services', () => {
     const social: SocialRepository = {
       findUserIdByUsername: vi.fn(async () => null),
       isFollowing: vi.fn(async () => false),
-      follow: vi.fn(),
+      getBlockStatus: vi.fn(async () => ({ blockedByMe: false, blockedYou: false })),
+      follow: vi.fn(async () => true),
       unfollow: vi.fn(),
+      block: vi.fn(),
+      unblock: vi.fn(),
+      canChat: vi.fn(async () => true),
       getFeed: vi.fn(async () => ({ items: [], totalResults: 0 })),
     };
     expect(() => new SocialService(social).follow(user.id, user.id)).toThrow('seguir o próprio perfil');
@@ -83,8 +87,12 @@ describe('module services', () => {
     const social: SocialRepository = {
       findUserIdByUsername: vi.fn(async (username) => username === 'alice' ? 'target-1' : null),
       isFollowing: vi.fn(async () => true),
-      follow: vi.fn(async () => undefined),
+      getBlockStatus: vi.fn(async () => ({ blockedByMe: false, blockedYou: false })),
+      follow: vi.fn(async () => true),
       unfollow: vi.fn(async () => undefined),
+      block: vi.fn(async () => undefined),
+      unblock: vi.fn(async () => undefined),
+      canChat: vi.fn(async () => true),
       getFeed: vi.fn(async () => ({ items: [], totalResults: 0 })),
     };
     const service = new SocialService(social);

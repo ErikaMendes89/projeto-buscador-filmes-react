@@ -1,7 +1,32 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { confirmPasswordReset, getCommonMovies, getFeed, getFollowStatus, getListVisibility, getMovieReviews, getMyInteractions, getMyReview, getPublicList, getPublicProfile, removeMyInteraction, removeMyReview, requestPasswordReset, saveMyInteraction, saveMyReview, searchPeople, setFollowing, setListVisibility, updateMyProfile } from './api';
+import { confirmPasswordReset, createConversation, getCommonMovies, getConversationHistory, getConversations, getFeed, getFollowStatus, getListVisibility, getMessagesAfter, getMovieReviews, getMyInteractions, getMyReview, getPublicList, getPublicProfile, markConversationRead, removeMyInteraction, removeMyReview, requestPasswordReset, saveMyInteraction, saveMyReview, searchPeople, setFollowing, setListVisibility, updateMyProfile } from './api';
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe('conversation API', () => {
+  it('loads conversations and paginated history with session cookies', async () => {
+    const summary = { id: 'conversation-1', kind: 'individual' as const, participant: { username: 'bob', displayName: 'Bob' }, lastMessage: null, lastMessageId: null, unreadCount: 0, updatedAt: '2026-01-01' };
+    const message = { id: 'message-1', conversationId: summary.id, clientMessageId: 'client-1', body: 'Oi', sender: { username: 'bob', displayName: 'Bob' }, createdAt: '2026-01-01' };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: [summary] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: [message], pagination: { page: 2, pageSize: 20, totalPages: 2, totalResults: 21 } }) })
+      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ data: { id: summary.id, kind: 'individual' } }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: [message], pagination: { hasMore: false, nextCursor: null } }) })
+      .mockResolvedValueOnce({ ok: true, status: 204 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getConversations()).resolves.toEqual([summary]);
+    await expect(getConversationHistory(summary.id, 2)).resolves.toEqual({ items: [message], page: 2, pageSize: 20, totalPages: 2, totalResults: 21 });
+    await expect(createConversation('bob')).resolves.toEqual({ id: summary.id, kind: 'individual' });
+    await expect(getMessagesAfter(summary.id, 'message-1')).resolves.toEqual({ items: [message], hasMore: false, nextCursor: null });
+    await expect(markConversationRead(summary.id)).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: 'include' });
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain('/messages?page=2');
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: 'POST', credentials: 'include', body: '{"username":"bob"}' });
+    expect(String(fetchMock.mock.calls[3]?.[0])).toContain('/messages/after/message-1');
+    expect(fetchMock.mock.calls[4]?.[1]).toMatchObject({ method: 'POST', credentials: 'include' });
+  });
+});
 
 describe('community feed API', () => {
   it('loads a requested feed page with its pagination metadata and session', async () => {

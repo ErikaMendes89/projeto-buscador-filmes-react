@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, BookmarkPlus, ChevronLeft, ChevronRight, Compass, Heart, ListVideo, MessageCircle, Search, Share2, Sparkles, Trash2, UserRound, Users, X } from 'lucide-react';
-import { useEffect, useState, type FormEvent } from 'react';
-import { authenticate, confirmPasswordReset, getCommonMovies, getFeed, getFollowStatus, getGenres, getListVisibility, getMovie, getMovieReviews, getMovies, getMyInteractions, getMyReview, getPublicList, getPublicProfile, getSession, logout, removeMyInteraction, removeMyReview, requestPasswordReset, saveMyInteraction, saveMyReview, searchPeople, setFollowing, setListVisibility, updateMyProfile, type CatalogFilters, type InteractionStatus, type Movie, type MovieInteraction, type PublicProfile, type Review, type SessionUser } from './api';
+import { ArrowLeft, BookmarkPlus, ChevronLeft, ChevronRight, Compass, Film, Heart, ListVideo, MessageCircle, RotateCw, Search, Send, Share2, Sparkles, Trash2, UserRound, Users, X } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { authenticate, confirmPasswordReset, conversationRealtimeUrl, createConversation, getBlockStatus, getCommonMovies, getConversationHistory, getConversations, getFeed, getFollowStatus, getGenres, getListVisibility, getMessagesAfter, getMovie, getMovieReviews, getMovies, getMyInteractions, getMyReview, getPublicList, getPublicProfile, getSession, logout, markConversationRead, removeMyInteraction, removeMyReview, requestPasswordReset, saveMyInteraction, saveMyReview, searchPeople, setBlocked, setFollowing, setListVisibility, updateMyProfile, type CatalogFilters, type ConversationMessage, type ConversationSummary, type InteractionStatus, type Movie, type MovieInteraction, type PublicProfile, type Review, type SessionUser } from './api';
 
 type AuthMode = 'login' | 'register' | 'request-reset';
 
@@ -715,10 +715,21 @@ function PublicProfilePage({ username }: { username: string }) {
   const ownsProfile = Boolean(session.user && profile.data && session.user.username === profile.data.username);
   const followKey = ['follow-status', session.user?.id, username];
   const followStatus = useQuery({ queryKey: followKey, queryFn: () => getFollowStatus(username), enabled: Boolean(session.user && profile.data && !ownsProfile), retry: false });
+  const blockKey = ['block-status', session.user?.id, username];
+  const blockStatus = useQuery({ queryKey: blockKey, queryFn: () => getBlockStatus(username), enabled: Boolean(session.user && profile.data && !ownsProfile), retry: false });
   const updateFollow = useMutation({
     mutationFn: (following: boolean) => setFollowing(username, following),
     onSuccess: async (_result, following) => {
       queryClient.setQueryData(followKey, { following });
+      await queryClient.invalidateQueries({ queryKey: ['public-profile', username] });
+      await queryClient.invalidateQueries({ queryKey: ['feed', session.user?.id] });
+    },
+  });
+  const updateBlock = useMutation({
+    mutationFn: (blocked: boolean) => setBlocked(username, blocked),
+    onSuccess: async (_result, blocked) => {
+      queryClient.setQueryData(blockKey, { blockedByMe: blocked, blockedYou: blockStatus.data?.blockedYou ?? false });
+      if (blocked) queryClient.setQueryData(followKey, { following: false });
       await queryClient.invalidateQueries({ queryKey: ['public-profile', username] });
       await queryClient.invalidateQueries({ queryKey: ['feed', session.user?.id] });
     },
@@ -763,14 +774,240 @@ function PublicProfilePage({ username }: { username: string }) {
 
 function ChatPage() {
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [username, setUsername] = useState('');
+  const [draft, setDraft] = useState('');
+  const [pending, setPending] = useState<{ id: string; conversationId: string; body: string; movieId?: number; movieTitle?: string; posterPath?: string | null; failed: boolean } | null>(null);
+  const [socketStatus, setSocketStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  const socketRef = useRef<WebSocket | null>(null);
+  const draftRef = useRef(draft);
+  const pendingRef = useRef(pending);
+  const cursorsRef = useRef<Record<string, { id: string; createdAt: string }>>({});
+  const channelRef = useRef<BroadcastChannel | null>(null);
   const queryClient = useQueryClient();
   const session = useSession();
+  const requestedMovieId = Number(new URLSearchParams(window.location.search).get('movie'));
+  const sharedMovieQuery = useQuery({ queryKey: ['movie', 'chat-share', requestedMovieId], queryFn: () => getMovie(requestedMovieId), enabled: Number.isInteger(requestedMovieId) && requestedMovieId > 0 });
+  const movieToShare = sharedMovieQuery.data?.movie;
+  const conversations = useQuery({ queryKey: ['conversations', session.user?.id], queryFn: getConversations, enabled: Boolean(session.user), refetchInterval: 15_000 });
+  const history = useQuery({ queryKey: ['conversation-messages', selectedId], queryFn: () => getConversationHistory(selectedId!), enabled: Boolean(selectedId) });
+  const create = useMutation({
+    mutationFn: createConversation,
+    onSuccess: async (conversation) => {
+      setSelectedId(conversation.id);
+      setUsername('');
+      await queryClient.invalidateQueries({ queryKey: ['conversations', session.user?.id] });
+    },
+  });
+
+  useEffect(() => { draftRef.current = draft; }, [draft]);
+  useEffect(() => { pendingRef.current = pending; }, [pending]);
+  useEffect(() => {
+    if (!session.user) return;
+    try {
+      const saved = localStorage.getItem(`moviematch-chat-cursors:${session.user.id}`);
+      cursorsRef.current = saved ? JSON.parse(saved) as Record<string, { id: string; createdAt: string }> : {};
+    } catch { cursorsRef.current = {}; }
+  }, [session.user?.id]);
+
+  const rememberCursor = (message: ConversationMessage) => {
+    const current = cursorsRef.current[message.conversationId];
+    if (current && (current.createdAt > message.createdAt || (current.createdAt === message.createdAt && current.id >= message.id))) return;
+    const next = { ...cursorsRef.current, [message.conversationId]: { id: message.id, createdAt: message.createdAt } };
+    cursorsRef.current = next;
+    if (session.user) {
+      try { localStorage.setItem(`moviematch-chat-cursors:${session.user.id}`, JSON.stringify(next)); } catch { /* A sincronização continua ativa nesta sessão. */ }
+    }
+  };
+
+  const cacheMessage = (message: ConversationMessage) => {
+    rememberCursor(message);
+    queryClient.setQueryData<{ items: ConversationMessage[]; page: number; pageSize: number; totalPages: number; totalResults: number }>(['conversation-messages', message.conversationId], (current) => {
+      if (!current) return current;
+      return { ...current, items: [message, ...current.items.filter((item) => item.id !== message.id && item.clientMessageId !== message.clientMessageId)] };
+    });
+  };
+
+  const recoverMessages = async () => {
+    if (!session.user) return;
+    const list = await getConversations();
+    queryClient.setQueryData(['conversations', session.user.id], list);
+    await Promise.all(list.map(async (conversation) => {
+      let cursor = cursorsRef.current[conversation.id];
+      if (!cursor) {
+        const latest = conversation.lastMessage;
+        if (latest) {
+          const initialCursor = { id: latest.id, createdAt: latest.createdAt };
+          const next = { ...cursorsRef.current, [conversation.id]: initialCursor };
+          cursorsRef.current = next;
+          try { localStorage.setItem(`moviematch-chat-cursors:${session.user!.id}`, JSON.stringify(next)); } catch { /* A sincronização continua ativa nesta sessão. */ }
+        }
+        return;
+      }
+      try {
+        let afterId = cursor.id;
+        while (true) {
+          const batch = await getMessagesAfter(conversation.id, afterId);
+          batch.items.forEach((message) => {
+            cacheMessage(message);
+            setPending((current) => {
+              if (!current || current.id !== message.clientMessageId) return current;
+              if (draftRef.current === current.body) setDraft('');
+              return null;
+            });
+          });
+          if (!batch.hasMore || !batch.nextCursor) break;
+          afterId = batch.nextCursor;
+        }
+      } catch {
+        if (selectedId === conversation.id) void queryClient.invalidateQueries({ queryKey: ['conversation-messages', conversation.id] });
+      }
+    }));
+    await queryClient.invalidateQueries({ queryKey: ['conversations', session.user.id] });
+  };
+  const recoverRef = useRef(recoverMessages);
+  useEffect(() => { recoverRef.current = recoverMessages; });
+
+  useEffect(() => {
+    if (!session.user || typeof BroadcastChannel === 'undefined') return;
+    const channel = new BroadcastChannel(`moviematch-chat:${session.user.id}`);
+    channelRef.current = channel;
+    channel.onmessage = (event: MessageEvent<{ type?: string; conversationId?: string; message?: ConversationMessage }>) => {
+      if (event.data.type === 'message' && event.data.message) {
+        cacheMessage(event.data.message);
+        void queryClient.invalidateQueries({ queryKey: ['conversation-messages', event.data.message.conversationId] });
+        void queryClient.invalidateQueries({ queryKey: ['conversations', session.user!.id] });
+      } else if (event.data.type === 'read') {
+        void queryClient.invalidateQueries({ queryKey: ['conversations', session.user!.id] });
+        if (event.data.conversationId) void queryClient.invalidateQueries({ queryKey: ['conversation-messages', event.data.conversationId] });
+      }
+    };
+    return () => { channel.close(); channelRef.current = null; };
+  }, [session.user?.id, queryClient]);
+
+  useEffect(() => {
+    if (!session.user) return;
+    let retryTimer: number | undefined;
+    let closed = false;
+    const connect = () => {
+      if (closed) return;
+      setSocketStatus('connecting');
+      const socket = new WebSocket(conversationRealtimeUrl());
+      socketRef.current = socket;
+      socket.onopen = () => {
+        setSocketStatus('connected');
+        void recoverRef.current();
+        if (pendingRef.current) sendPending(pendingRef.current);
+      };
+      socket.onmessage = (event) => {
+        let payload: { type?: string; code?: string; data?: ConversationMessage };
+        try { payload = JSON.parse(String(event.data)) as typeof payload; } catch { return; }
+        if (payload.type === 'message' && payload.data) {
+          const message = payload.data;
+          cacheMessage(message);
+          channelRef.current?.postMessage({ type: 'message', message });
+          void queryClient.invalidateQueries({ queryKey: ['conversations', session.user?.id] });
+          setPending((current) => {
+            if (!current || current.id !== message.clientMessageId) return current;
+            if (draftRef.current === current.body) setDraft('');
+            return null;
+          });
+        } else if (payload.type === 'error') {
+          setPending((current) => current ? { ...current, failed: true } : current);
+        }
+      };
+      socket.onclose = () => {
+        if (closed) return;
+        setSocketStatus('disconnected');
+        setPending((current) => current ? { ...current, failed: true } : current);
+        retryTimer = window.setTimeout(connect, 1200);
+      };
+    };
+    connect();
+    return () => { closed = true; if (retryTimer) window.clearTimeout(retryTimer); socketRef.current?.close(); socketRef.current = null; };
+  }, [session.user?.id, queryClient]);
+
+  useEffect(() => {
+    if (!selectedId || !session.user || !history.isSuccess) return;
+    let active = true;
+    void markConversationRead(selectedId).then(() => {
+      if (!active) return;
+      channelRef.current?.postMessage({ type: 'read', conversationId: selectedId });
+      void queryClient.invalidateQueries({ queryKey: ['conversations', session.user?.id] });
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [selectedId, session.user?.id, history.isSuccess, history.data?.items[0]?.id, queryClient]);
+
+  useEffect(() => {
+    const refreshOnFocus = () => { void recoverRef.current(); };
+    const refreshOnVisible = () => { if (document.visibilityState === 'visible') void recoverRef.current(); };
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnVisible);
+    return () => { window.removeEventListener('focus', refreshOnFocus); document.removeEventListener('visibilitychange', refreshOnVisible); };
+  }, []);
+
+  const send = (event?: FormEvent) => {
+    event?.preventDefault();
+    if (!selectedId || !draft.trim() || pending) return;
+    const message = { id: crypto.randomUUID(), conversationId: selectedId, body: draft.trim(), failed: false };
+    setPending(message);
+    sendPending(message);
+  };
+  const sendPending = (message: { id: string; conversationId: string; body: string; movieId?: number; movieTitle?: string; posterPath?: string | null; failed: boolean }) => {
+    if (socketRef.current?.readyState !== WebSocket.OPEN) {
+      setPending({ ...message, failed: true });
+      return;
+    }
+    setPending({ ...message, failed: false });
+    socketRef.current.send(JSON.stringify({ type: 'send_message', conversationId: message.conversationId, clientMessageId: message.id, ...(message.movieId === undefined ? { body: message.body } : { movieId: message.movieId }) }));
+  };
+  const shareMovie = () => {
+    if (!selectedId || !movieToShare || pending) return;
+    const message = { id: crypto.randomUUID(), conversationId: selectedId, body: `Filme compartilhado: ${movieToShare.title}`, movieId: movieToShare.id, movieTitle: movieToShare.title, posterPath: movieToShare.posterPath, failed: false };
+    setPending(message);
+    sendPending(message);
+  };
+  const selected = conversations.data?.find((conversation) => conversation.id === selectedId) ?? null;
   return <div className="shell">
     <Header user={session.user} onSignIn={() => setAuthMode('login')} onSignOut={session.signOut} signingOut={session.signingOut} activePage="chat" />
     <main className="chat-main">
-      <section className="chat-placeholder"><MessageCircle size={34} /><p className="eyebrow">CONVERSAS</p><h1>Chat</h1>
-        {session.isLoading ? <p role="status">Verificando sua sessão…</p> : session.user ? <p>As conversas individuais estarão disponíveis em uma próxima etapa.</p> : <><p>Entre para acessar conversas quando o chat estiver disponível.</p><button className="filter-submit" onClick={() => setAuthMode('login')}>Entrar</button></>}
-      </section>
+      <section className="chat-heading"><p className="eyebrow">MOVIEMATCH SOCIAL</p><h1>Conversas</h1><p>Troque mensagens com quem segue você de volta.</p></section>
+      {session.isLoading && <div className="state" role="status">Verificando sua sessão…</div>}
+      {!session.isLoading && !session.user && <section className="state list-auth-prompt"><MessageCircle size={30} /><h2>Entre para conversar</h2><p>Suas conversas ficam disponíveis após entrar na conta.</p><button className="filter-submit" onClick={() => setAuthMode('login')}>Entrar</button></section>}
+      {session.user && <div className="chat-layout">
+        <aside className="chat-sidebar" aria-label="Lista de conversas">
+          <form className="chat-new-form" onSubmit={(event) => { event.preventDefault(); create.mutate(username.trim()); }}>
+            <label htmlFor="chat-username">Nova conversa</label><div><input id="chat-username" value={username} minLength={3} maxLength={40} pattern="[A-Za-z0-9_]+" placeholder="Username" onChange={(event) => setUsername(event.target.value)} required /><button className="filter-submit" type="submit" disabled={create.isPending}>{create.isPending ? 'Abrindo…' : 'Abrir'}</button></div>
+          </form>
+          {create.isError && <p className="auth-error" role="alert">{create.error.message}</p>}
+          {conversations.isError && <p className="auth-error" role="alert">{conversations.error.message} <button className="inline-retry" onClick={() => void conversations.refetch()}>Tentar novamente</button></p>}
+          {conversations.isLoading && <p role="status">Carregando conversas…</p>}
+          {!conversations.isLoading && !conversations.isError && conversations.data?.length === 0 && <p className="chat-empty">Você ainda não tem conversas. Informe um username para começar.</p>}
+          <div className="chat-conversation-list">{conversations.data?.map((conversation: ConversationSummary) => {
+            const latest = conversation.lastMessage;
+            const unreadCount = conversation.unreadCount ?? 0;
+            return <button key={conversation.id} className={`chat-conversation ${conversation.id === selectedId ? 'selected' : ''}`} type="button" onClick={() => setSelectedId(conversation.id)}>
+              <span className="profile-avatar" aria-hidden="true">{conversation.participant.displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span><span className="chat-conversation-copy"><strong>{conversation.participant.displayName}</strong><small>{latest ? `${latest.senderUsername === session.user?.username ? 'Você: ' : ''}${latest.body}` : `@${conversation.participant.username}`}</small></span>{unreadCount > 0 && <span className="chat-unread">{unreadCount > 99 ? '99+' : unreadCount} não lidas</span>}
+            </button>;
+          })}</div>
+        </aside>
+        <section className="chat-thread" aria-label={selected ? `Conversa com ${selected.participant.displayName}` : 'Mensagens'}>
+          {!selected && <div className="chat-thread-empty"><MessageCircle size={32} /><h2>Escolha uma conversa</h2><p>Suas mensagens aparecerão aqui.</p></div>}
+          {selected && <>
+            <header className="chat-thread-heading"><span className="profile-avatar" aria-hidden="true">{selected.participant.displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span><div><h2>{selected.participant.displayName}</h2><span>@{selected.participant.username}</span></div><span className={`chat-connection ${socketStatus}`}>{socketStatus === 'connected' ? 'Conectado' : socketStatus === 'connecting' ? 'Conectando…' : 'Reconectando…'}</span></header>
+            {requestedMovieId > 0 && (sharedMovieQuery.isLoading ? <p className="chat-compose-hint" role="status">Validando filme…</p> : sharedMovieQuery.isError ? <p className="auth-error" role="alert">Não foi possível validar este filme no catálogo.</p> : movieToShare && <aside className="chat-share-movie"><Film size={18} /><span>Compartilhar <strong>{movieToShare.title}</strong> nesta conversa</span><button className="filter-submit" type="button" onClick={shareMovie} disabled={Boolean(pending)}>{pending?.movieId === movieToShare.id ? pending.failed ? 'Falhou — tente novamente abaixo' : 'Enviando…' : 'Enviar filme'}</button></aside>)}
+            <div className="chat-messages" aria-live="polite">
+              {history.isLoading && <p role="status">Carregando mensagens…</p>}
+              {history.isError && <p className="auth-error" role="alert">{history.error.message} <button className="inline-retry" onClick={() => void history.refetch()}>Tentar novamente</button></p>}
+              {history.data?.items.length === 0 && <p className="chat-empty">Esta conversa ainda não tem mensagens.</p>}
+              {[...(history.data?.items ?? [])].reverse().map((message) => <article key={message.id} className={`chat-bubble ${message.sender.username === session.user?.username ? 'mine' : ''}`}>{message.movie ? <a className="chat-movie-reference" href={`/movies/${message.movie.id}`}><Film size={18} /><strong>{message.movie.title}</strong><span>Ver detalhes do filme</span></a> : <p>{message.body}</p>}<time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</time></article>)}
+              {pending && pending.conversationId === selectedId && <article className="chat-bubble mine pending">{pending.movieId ? <a className="chat-movie-reference" href={`/movies/${pending.movieId}`}><Film size={18} /><strong>{pending.movieTitle}</strong><span>Ver detalhes do filme</span></a> : <p>{pending.body}</p>}<span>{pending.failed ? 'Falhou ao enviar' : 'Enviando…'}</span>{pending.failed && <button type="button" className="inline-retry" onClick={() => sendPending(pending)}><RotateCw size={14} /> Tentar novamente</button>}</article>}
+            </div>
+            <form className="chat-compose" onSubmit={send}><label className="sr-only" htmlFor="chat-message">Mensagem</label><textarea id="chat-message" rows={2} maxLength={4000} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Escreva uma mensagem…" required /><button className="filter-submit" type="submit" disabled={!draft.trim() || Boolean(pending)}><Send size={16} /> Enviar</button></form>
+            {pending?.failed && <p className="chat-compose-hint" role="status">A mensagem e o texto continuam aqui. Tente novamente para reenviar.</p>}
+          </>}
+        </section>
+      </div>}
     </main>
     <footer><span className="brand"><span>Movie</span>Match</span><p>Descubra. Compartilhe. Dê match.</p></footer>
     {authMode && <AuthDialog mode={authMode} onModeChange={setAuthMode} onClose={() => setAuthMode(null)} onAuthenticated={async () => { setAuthMode(null); await queryClient.invalidateQueries({ queryKey: ['session'] }); }} />}
