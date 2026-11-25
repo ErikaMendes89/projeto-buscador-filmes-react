@@ -717,6 +717,8 @@ function PublicProfilePage({ username }: { username: string }) {
   const followStatus = useQuery({ queryKey: followKey, queryFn: () => getFollowStatus(username), enabled: Boolean(session.user && profile.data && !ownsProfile), retry: false });
   const blockKey = ['block-status', session.user?.id, username];
   const blockStatus = useQuery({ queryKey: blockKey, queryFn: () => getBlockStatus(username), enabled: Boolean(session.user && profile.data && !ownsProfile), retry: false });
+  const block = blockStatus.data;
+  const followUnavailable = Boolean(block?.blockedByMe || block?.blockedYou);
   const updateFollow = useMutation({
     mutationFn: (following: boolean) => setFollowing(username, following),
     onSuccess: async (_result, following) => {
@@ -757,9 +759,37 @@ function PublicProfilePage({ username }: { username: string }) {
         <p className="profile-follow-counts"><span>{profile.data.followersCount ?? 0} seguidores</span><span>{profile.data.followingCount ?? 0} seguindo</span></p>
         {profile.data.bio && <p className="profile-bio">{profile.data.bio}</p>}
         {!ownsProfile && session.user && <div className="profile-follow-actions">
-          {followStatus.isLoading ? <span role="status">Verificando relação…</span> : <button className="account-button" type="button" disabled={followStatus.isError || updateFollow.isPending} onClick={() => updateFollow.mutate(!followStatus.data?.following)}>{updateFollow.isPending ? 'Salvando…' : followStatus.data?.following ? 'Deixar de seguir' : 'Seguir'}</button>}
+          {followStatus.isLoading ? <span role="status">Verificando relação…</span> : (
+            <button
+              className="account-button"
+              type="button"
+              disabled={followStatus.isError || followUnavailable || updateFollow.isPending || updateBlock.isPending}
+              onClick={() => updateFollow.mutate(!followStatus.data?.following)}
+            >
+              {updateFollow.isPending ? 'Salvando…' : followStatus.data?.following ? 'Deixar de seguir' : 'Seguir'}
+            </button>
+          )}
           {followStatus.isError && <p className="auth-error" role="alert">{followStatus.error.message} <button type="button" className="inline-retry" onClick={() => void followStatus.refetch()}>Tentar novamente</button></p>}
           {updateFollow.isError && <p className="auth-error" role="alert">{updateFollow.error.message}</p>}
+          {blockStatus.isLoading && <span role="status">Verificando bloqueio…</span>}
+          {block && (
+            <button
+              className="account-button"
+              type="button"
+              disabled={updateBlock.isPending || updateFollow.isPending}
+              onClick={() => updateBlock.mutate(!block.blockedByMe)}
+            >
+              {updateBlock.isPending ? 'Salvando…' : block.blockedByMe ? 'Desbloquear perfil' : 'Bloquear perfil'}
+            </button>
+          )}
+          {followUnavailable && <span>Seguir fica indisponível enquanto houver um bloqueio.</span>}
+          {blockStatus.isError && (
+            <p className="auth-error" role="alert">
+              {blockStatus.error.message}{' '}
+              <button type="button" className="inline-retry" onClick={() => void blockStatus.refetch()}>Tentar novamente</button>
+            </p>
+          )}
+          {updateBlock.isError && <p className="auth-error" role="alert">{updateBlock.error.message}</p>}
         </div>}
         {!ownsProfile && !session.user && !session.isLoading && !session.isError && <button className="account-button" type="button" onClick={() => navigateTo(loginPathForCurrentPage())}>Entre para seguir</button>}
         {ownsProfile && !editing && <button className="account-button profile-edit-trigger" type="button" onClick={() => setEditing(true)}>Editar perfil</button>}
