@@ -2,20 +2,22 @@
 
 Rede social de descoberta de filmes: encontre o que assistir, organize sua watchlist e descubra o que você e seus amigos gostam em comum.
 
-> O projeto nasceu como um buscador React + MongoDB em 2024. A pasta `my-app/` preserva essa primeira versão; a arquitetura atual vive em `apps/`.
+> O projeto nasceu como um buscador React + MongoDB em 2024. A pasta `my-app/` preserva essa primeira versão. A arquitetura atual vive em `apps/`.
 
-## Primeira entrega da evolução
+## Comece pelo catálogo demonstrativo
 
-- interface responsiva em React 19, TypeScript e Vite;
-- catálogo e busca via TMDB, sem expor o token no navegador;
-- catálogo demonstrativo quando nenhum token é configurado;
-- API Node.js/Express modular e validada com Zod;
-- PostgreSQL com modelo inicial de usuário e interações;
-- estados preparados para `quero assistir`, `assistindo`, `assistido`, `abandonei` e `favorito`;
-- atualização de watchlist sem recarregar a página;
-- headers de segurança, CORS restrito e payload limitado;
-- testes de API e interface;
-- build, lint e testes automatizados no GitHub Actions.
+Use o [guia da primeira lista de filmes](docs/first-watchlist.md) para buscar
+um dos títulos de exemplo, salvá-lo na sua lista e seguir a gravação até o
+PostgreSQL. O catálogo demonstrativo funciona com `TMDB_API_TOKEN` vazio.
+
+## O que existe hoje
+
+| Área | O que você pode usar |
+| --- | --- |
+| Catálogo | Busca por título, descoberta com filtros e detalhes de filmes via TMDB ou dados demonstrativos. |
+| Conta e lista pessoal | Cadastro, login e perfil público. A lista começa privada e permite salvar filmes, mudar o status e marcar favoritos de forma independente. |
+| Comunidade | Resenhas públicas, busca por username, seguir e bloquear perfis, feed de resenhas e filmes em comum com listas públicas. |
+| Conversas | Chat individual por WebSocket, histórico, marcação de leitura e compartilhamento de filmes. Enviar mensagens exige que os dois perfis se sigam e que nenhum tenha bloqueado o outro. |
 
 ## Arquitetura
 
@@ -36,28 +38,49 @@ apps/api/src/modules/
 ├── users/      perfis públicos
 ├── movies/     catálogo TMDB e interações
 ├── reviews/    notas e resenhas
-└── social/     follows e feed
+└── social/     follows, feed, bloqueios e conversas
 ```
 
-`container.ts` é a raiz de composição: instancia os repositórios e injeta as dependências nos serviços. As rotas não executam SQL diretamente. Microserviços só serão considerados se volume ou autonomia de times justificarem a separação.
+[`container.ts`](apps/api/src/container.ts) instancia os repositórios e injeta as dependências nos serviços. As rotas validam a entrada, os serviços aplicam as regras do domínio e os repositórios cuidam do SQL. Microserviços só serão considerados se volume ou autonomia de times justificarem a separação.
 
 ## Executar localmente
 
-Requisitos: Node.js 22+, npm 10+ e Docker.
+Use Node.js 22.12+, npm 10+ e Docker com Compose. O primeiro exercício parte
+de um volume PostgreSQL novo. Na raiz do clone, crie o `.env` se precisar e
+mantenha `TMDB_API_TOKEN` vazio para usar o catálogo demonstrativo.
 
 ```bash
-cp .env.example .env
-docker compose up -d
-npm install
-npm run db:migrate -w @moviematch/api
+test -f .env || cp .env.example .env
+docker compose up -d postgres
+npm ci
+```
+
+Na primeira inicialização do volume, o [Compose](docker-compose.yml) executa
+os arquivos SQL de `apps/api/sql/`. Confirme que o banco aceita conexões TCP
+antes de iniciar a API.
+
+```bash
+docker compose exec -T postgres sh -c 'pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+Quando o comando mostrar `accepting connections`, inicie os aplicativos.
+
+```bash
 npm run dev
 ```
 
-- Web: http://localhost:5173
-- API: http://localhost:3333
-- Health check: http://localhost:3333/health
+- Interface em `http://localhost:5173`.
+- API em `http://localhost:3333`.
+- Health check da API em `http://localhost:3333/health`.
 
-O sistema abre com três filmes demonstrativos sem credenciais. Para usar o catálogo real, crie um token de leitura na TMDB e preencha `TMDB_API_TOKEN` no `.env`.
+Para um volume novo no Windows, use o [script PowerShell](local.ps1) com
+`./local.ps1 -SkipMigrations`. O parâmetro deixa a inicialização do esquema
+a cargo do PostgreSQL do Compose.
+
+Em bancos preparados pelo [script de migrations](apps/api/src/scripts/migrate.ts),
+`npm run db:migrate -w @moviematch/api` aplica os arquivos que ainda não constam
+no histórico de migrations. Para usar o catálogo real, preencha `TMDB_API_TOKEN` no
+`.env` com um token de leitura da TMDB e reinicie a API.
 
 ## Qualidade
 
@@ -67,7 +90,7 @@ npm run check
 
 Esse comando valida os tipos, executa os testes e gera os builds de produção dos dois aplicativos.
 
-## Endpoints iniciais
+## Endpoints principais
 
 | Método | Rota | Uso |
 |---|---|---|
@@ -92,11 +115,20 @@ Esse comando valida os tipos, executa os testes e gera os builds de produção d
 | `GET` | `/api/users/:username/common` | Filmes em comum com uma lista pública (requer sessão) |
 | `GET/PUT` | `/api/me/list-visibility` | Consultar ou alterar visibilidade da própria lista |
 | `GET` | `/api/movies/:movieId/reviews` | Resenhas de um filme |
-| `PUT` | `/api/movies/:movieId/reviews/me` | Publicar a própria resenha |
+| `GET/PUT/DELETE` | `/api/movies/:movieId/reviews/me` | Consultar, publicar ou remover a própria resenha |
 | `GET` | `/api/feed?page=1` | Feed paginado de resenhas próprias e de perfis seguidos com lista pública |
 | `PUT/DELETE` | `/api/users/:userId/follow` | Seguir ou deixar de seguir |
+| `GET/PUT/DELETE` | `/api/users/by-username/:username/block` | Consultar, bloquear ou desbloquear um perfil (sessão obrigatória) |
+| `GET/POST` | `/api/conversations` | Listar conversas ou abrir uma conversa individual (sessão obrigatória) |
+| `GET` | `/api/conversations/:conversationId/messages` | Consultar o histórico paginado de uma conversa (sessão obrigatória) |
+| `POST` | `/api/conversations/:conversationId/messages/read` | Marcar mensagens como lidas (sessão obrigatória) |
 
-O `PUT` recebe `{ "title": "...", "posterPath": null, "status": "want_to_watch", "isFavorite": false }`; os status válidos são `want_to_watch`, `watching`, `watched` e `abandoned`. `isFavorite` é opcional e, quando omitido numa atualização, o valor salvo é preservado. A combinação única por conta e filme transforma inclusões repetidas em atualização, sem criar duplicatas.
+O `PUT /api/me/interactions/:movieId` recebe um corpo como
+`{ "title": "Interestelar", "posterPath": null, "status": "want_to_watch", "isFavorite": false }`.
+Os estados válidos são `want_to_watch`, `watching`, `watched` e `abandoned`.
+`isFavorite` é opcional. Omitir esse campo em uma atualização preserva o valor
+anterior. A combinação única por conta e filme transforma inclusões repetidas em
+atualização, mantendo uma linha por filme na lista de cada conta.
 
 A conta local de demonstração permanece como dado inicial sem senha: não pode iniciar sessão e não é retornada como perfil público. Todas as operações pessoais usam o usuário resolvido pela sessão validada no backend; nenhum identificador de demonstração é enviado pelo cliente.
 
@@ -106,15 +138,9 @@ Listas são privadas por padrão. Tornar uma lista pública publica seus filmes,
 
 ## Roadmap
 
-O roadmap abaixo resume a evolução planejada do produto.
-
-- **v1.0 — fundação:** monorepo, TypeScript, Vite, API modular, PostgreSQL, Docker e CI.
-- **v1.1 — identidade:** cadastro, login, sessões seguras e perfil.
-- **v1.2 — diário de filmes:** avaliações, reviews e histórico.
-- **v2.0 — social:** seguir pessoas, feed, curtidas, comentários e listas.
-- **v2.1 — Movie Match:** compatibilidade e watchlists em comum.
-- **v3.0 — recomendação:** recomendação híbrida e busca semântica.
-- **v4.0 — produção:** observabilidade, proteção contra abuso e deploy.
+- **Evoluir a comunidade.** Curtidas e comentários em resenhas, além de mais recursos de compatibilidade entre perfis.
+- **Investigar recomendações.** Experimentar busca semântica e recomendação híbrida quando houver dados e métricas para avaliá-las.
+- **Preparar a operação em produção.** Configurar o serviço de e-mail da recuperação de senha, ampliar observabilidade e proteção contra abuso e preparar o deploy.
 
 ## Decisões registradas
 

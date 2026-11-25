@@ -244,7 +244,7 @@ describe('MovieMatch home', () => {
 
     window.history.pushState(null, '', '/chat');
     fireEvent(window, new PopStateEvent('popstate'));
-    expect(await screen.findByRole('heading', { name: 'Chat' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Conversas' })).toBeInTheDocument();
   });
 
   it('opens community, profile, and login pages from direct URLs', async () => {
@@ -331,6 +331,7 @@ describe('MovieMatch home', () => {
       if (url.includes('/api/auth/session')) return { ok: true, status: 200, json: async () => ({ data: { user: { ...signedInUser, username: 'viewer' } } }) } as Response;
       if (url.endsWith('/api/users/alice')) return { ok: true, status: 200, json: async () => ({ data: { username: 'alice', displayName: 'Alice Example', bio: 'Cinema', createdAt: '2026-01-01', followersCount: 12, followingCount: 7 } }) } as Response;
       if (url.endsWith('/api/users/alice/list')) return { ok: true, status: 200, json: async () => ({ data: [] }) } as Response;
+      if (url.endsWith('/api/users/by-username/alice/block')) return { ok: true, status: 200, json: async () => ({ data: { blockedByMe: false, blockedYou: false } }) } as Response;
       if (url.endsWith('/api/users/by-username/alice/follow')) {
         if (init?.method === 'DELETE') following = false;
         if (init?.method === 'PUT') following = true;
@@ -350,6 +351,48 @@ describe('MovieMatch home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Seguir' }));
     expect(await screen.findByRole('button', { name: 'Deixar de seguir' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/users/by-username/alice/follow'), expect.objectContaining({ method: 'PUT', credentials: 'include' }));
+  });
+
+  it('blocks and unblocks a public profile without restoring the previous follow', async () => {
+    let blockedByMe = false;
+    let following = true;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      const json = (data: unknown) => ({ ok: true, status: 200, json: async () => ({ data }) }) as Response;
+      if (path === '/api/auth/session') return json({ user: signedInUser });
+      if (path === '/api/users/bob') {
+        return json({ username: 'bob', displayName: 'Bob', bio: null, createdAt: signedInUser.createdAt });
+      }
+      if (path === '/api/users/by-username/bob/follow') return json({ following });
+      if (path === '/api/users/by-username/bob/block') {
+        if (init?.method === 'PUT') {
+          blockedByMe = true;
+          following = false;
+          return { ok: true, status: 204 } as Response;
+        }
+        if (init?.method === 'DELETE') {
+          blockedByMe = false;
+          return { ok: true, status: 204 } as Response;
+        }
+        return json({ blockedByMe, blockedYou: false });
+      }
+      return json([]);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState(null, '', '/users/bob');
+    renderApp();
+
+    const blockButton = await screen.findByRole('button', { name: 'Bloquear perfil' });
+    expect(await screen.findByRole('button', { name: 'Deixar de seguir' })).toBeEnabled();
+    fireEvent.click(blockButton);
+    const unblockButton = await screen.findByRole('button', { name: 'Desbloquear perfil' });
+    expect(screen.getByRole('button', { name: 'Seguir' })).toBeDisabled();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/users/by-username/bob/block'), expect.objectContaining({ method: 'PUT', credentials: 'include' }));
+
+    fireEvent.click(unblockButton);
+    expect(await screen.findByRole('button', { name: 'Bloquear perfil' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Seguir' })).toBeEnabled();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/users/by-username/bob/block'), expect.objectContaining({ method: 'DELETE', credentials: 'include' }));
   });
 
   it('lets the signed-in profile owner edit their name, username, and bio', async () => {
